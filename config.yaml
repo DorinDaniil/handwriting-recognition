@@ -1,0 +1,93 @@
+# DBNet++ (2202.10304) — single-file config. Override from CLI:
+#   python train.py trainer.epochs=200 data.batch_size=4 model.backbone.pretrained=false
+
+experiment:
+  name: dbnetpp_r18_hwr
+  output_dir: outputs
+  seed: 42
+
+data:
+  dataset_root: /mnt/DATA2/seilov/hw_dataset/hw_dataset
+  labels_txt: labels/labels.txt
+  splits_dir: splits
+  train_split: splits/train.txt
+  val_split: splits/val.txt
+  val_fraction: 0.1
+  min_score: 0.5              # drop pseudo-boxes below this
+  image_size: 640             # square input
+  batch_size: 8
+  num_workers: 4
+  pin_memory: true
+
+aug:
+  tier: handwriting           # one of: none | standard | handwriting
+  # probabilities for handwriting tier
+  p_elastic: 0.2
+  p_perspective: 0.3
+  p_shadow: 0.2
+  p_paper_texture: 0.15
+  p_ink_fade: 0.15
+  p_blur: 0.3
+  p_noise: 0.3
+  p_color_jitter: 0.5
+  # geometric
+  rotate_deg: 10
+  scale_range: [0.6, 1.4]
+  box_jitter_px: 2            # random px jitter on polygon vertices (absorbs teacher noise)
+
+target:
+  shrink_ratio: 0.4           # Vatti shrink for positive region
+  thresh_min: 0.3             # threshold map min / max
+  thresh_max: 0.7
+
+model:
+  name: dbnetpp
+  backbone:
+    name: resnet18
+    pretrained: true
+    use_dcn: true             # DCNv2 in stages 3-5
+    dcn_stages: [false, false, true, true, true]   # stage 1..5
+  neck:
+    inner_channels: 256
+    out_channels: 256
+    use_asf: true
+  head:
+    k: 50                     # DB sharpness
+    thresh: 0.3               # infer binarization thresh
+    bias: false
+
+loss:
+  alpha: 1.0                  # probability map weight (L_s)
+  beta: 10.0                  # threshold map weight (L_t) — paper uses 10
+  ohem_ratio: 3.0             # neg/pos ratio for OHEM BCE
+  dice_weight: 1.0            # Dice added on top of BCE for prob map
+  bce_weight: 1.0
+  score_weighting: true       # down-weight loss on low-confidence pseudo-labels
+
+trainer:
+  epochs: 120
+  optimizer: adamw
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  betas: [0.9, 0.999]
+  scheduler: cosine_warmup
+  warmup_epochs: 3
+  min_lr: 1.0e-6
+  amp: true
+  amp_dtype: bf16             # bf16 | fp16 | fp32
+  grad_clip: 5.0
+  ema: true
+  ema_decay: 0.9995
+  log_every: 50
+  eval_every: 1               # epochs
+  save_every: 5               # epochs (keeps last + best)
+  resume: null                # path to checkpoint or null
+
+postprocess:
+  thresh: 0.3                 # binarize probability map
+  box_thresh: 0.5             # min mean prob per box
+  unclip_ratio: 1.8           # inverse of shrink_ratio, slightly higher
+  max_candidates: 1000
+  min_size: 3                 # min side of detected polygon
+
+device: cuda

@@ -1,0 +1,13 @@
+torch>=2.1
+torchvision>=0.16
+numpy
+opencv-python
+pillow
+pyclipper
+shapely
+omegaconf
+albumentations>=1.4
+tqdm
+pyyaml
+matplotlib
+scipy
