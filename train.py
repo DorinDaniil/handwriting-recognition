@@ -52,17 +52,13 @@ def _build_aug_cfg(cfg) -> AugConfig:
     return AugConfig(
         tier=a.tier,
         image_size=cfg.data.image_size,
-        rotate_deg=a.rotate_deg,
-        scale_range=tuple(a.scale_range),
-        box_jitter_px=a.box_jitter_px,
-        p_elastic=a.p_elastic,
-        p_perspective=a.p_perspective,
-        p_shadow=a.p_shadow,
-        p_paper_texture=a.p_paper_texture,
-        p_ink_fade=a.p_ink_fade,
+        p_rot90=a.p_rot90,
+        p_hflip=a.p_hflip,
+        p_vflip=a.p_vflip,
+        p_color_jitter=a.p_color_jitter,
         p_blur=a.p_blur,
         p_noise=a.p_noise,
-        p_color_jitter=a.p_color_jitter,
+        box_jitter_px=a.box_jitter_px,
     )
 
 

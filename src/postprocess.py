@@ -1,23 +1,26 @@
-"""DBNet++ post-processing: probability map -> polygons.
+"""DBNet++ post-processing: probability map -> polygons. Pure numpy/shapely.
 
-Steps:
-    1. Binarize: mask = prob > thresh
-    2. Find contours (CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE).
-    3. For each contour:
-        a. Filter by mean probability >= box_thresh.
-        b. Filter by min_size.
-        c. Unclip (Vatti-expand) by unclip_ratio.
-        d. Fit minAreaRect -> 4-point polygon.
-    4. Rescale to original image size.
+Pipeline:
+    1. Binarize:       mask = prob > cfg.thresh
+    2. Connected components via scipy.ndimage.label
+    3. For each component:
+        a. Mean prob check (>= cfg.box_thresh)
+        b. Fit minimum rotated rectangle (shapely)
+        c. Check short side (>= cfg.min_size)
+        d. Unclip by cfg.unclip_ratio via pyclipper (Vatti offset)
+        e. Fit min rotated rect to the expanded polygon
+    4. Undo preprocess transform (pad + scale) to go back to original image coords.
+
+No OpenCV anywhere.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-import cv2
 import numpy as np
 import pyclipper
-from shapely.geometry import Polygon
+from scipy.ndimage import label as nd_label
+from shapely.geometry import MultiPoint, Polygon
 
 
 @dataclass
@@ -29,99 +32,132 @@ class PostprocessConfig:
     min_size: int = 3
 
 
+# --- helpers --------------------------------------------------------------
+
+def _rect_short_side(rect: np.ndarray) -> float:
+    """rect: (4, 2) points of a rotated rectangle, in order around the perimeter."""
+    d1 = np.linalg.norm(rect[1] - rect[0])
+    d2 = np.linalg.norm(rect[2] - rect[1])
+    return float(min(d1, d2))
+
+
+def _min_rotated_rect(points: np.ndarray) -> np.ndarray | None:
+    """Return the 4 corner points of the minimum rotated rectangle around `points`."""
+    if len(points) < 2:
+        return None
+    try:
+        mrr = MultiPoint(points).minimum_rotated_rectangle
+    except Exception:
+        return None
+    if mrr.is_empty or not hasattr(mrr, "exterior"):
+        return None
+    coords = np.asarray(mrr.exterior.coords, dtype=np.float32)[:-1]  # drop repeated last
+    if coords.shape != (4, 2):
+        return None
+    return coords
+
+
 def _unclip(poly: np.ndarray, unclip_ratio: float) -> np.ndarray | None:
-    polygon = Polygon(poly)
-    distance = polygon.area * unclip_ratio / max(polygon.length, 1e-6)
+    """Vatti-expand the polygon outward. Returns a new (M, 2) polygon or None."""
+    try:
+        shapely_poly = Polygon(poly)
+        if not shapely_poly.is_valid or shapely_poly.length <= 0:
+            return None
+        distance = shapely_poly.area * unclip_ratio / shapely_poly.length
+    except Exception:
+        return None
+
     offset = pyclipper.PyclipperOffset()
     offset.AddPath([tuple(p) for p in poly],
                    pyclipper.JT_ROUND, pyclipper.ET_CLOSEDPOLYGON)
     expanded = offset.Execute(distance)
     if not expanded:
         return None
-    expanded = np.array(expanded[0])
-    if len(expanded) < 4:
+    arr = np.asarray(expanded[0], dtype=np.float32)
+    if len(arr) < 4:
         return None
-    return expanded
+    return arr
 
 
-def _mean_score(prob_map: np.ndarray, contour: np.ndarray) -> float:
-    h, w = prob_map.shape
-    xmin = int(max(0, np.floor(contour[:, 0].min())))
-    xmax = int(min(w - 1, np.ceil(contour[:, 0].max())))
-    ymin = int(max(0, np.floor(contour[:, 1].min())))
-    ymax = int(min(h - 1, np.ceil(contour[:, 1].max())))
-    if xmax <= xmin or ymax <= ymin:
-        return 0.0
-    crop = prob_map[ymin:ymax + 1, xmin:xmax + 1]
-    mask = np.zeros_like(crop, dtype=np.uint8)
-    shifted = contour.copy()
-    shifted[:, 0] -= xmin
-    shifted[:, 1] -= ymin
-    cv2.fillPoly(mask, [shifted.astype(np.int32)], 1)
-    if mask.sum() == 0:
-        return 0.0
-    return float(cv2.mean(crop, mask)[0])
-
-
-def _min_rect_quad(contour: np.ndarray) -> tuple[np.ndarray, float]:
-    rect = cv2.minAreaRect(contour.astype(np.float32))
-    box = cv2.boxPoints(rect)
-    (_, _), (w, h), _ = rect
-    return box, min(w, h)
-
+# --- main -----------------------------------------------------------------
 
 def decode_prob_map(
     prob_map: np.ndarray,
-    original_size: tuple[int, int],
     cfg: PostprocessConfig | None = None,
+    *,
+    scale: float = 1.0,
+    pad: tuple[float, float] = (0.0, 0.0),
+    original_size: tuple[int, int] | None = None,
 ) -> tuple[list[np.ndarray], list[float]]:
-    """
+    """Convert a probability map into a list of rotated-quad polygons.
+
     Args:
-        prob_map: (H, W) float32 probability in [0, 1] at network resolution.
-        original_size: (orig_h, orig_w) image size to rescale polygons back to.
+        prob_map:      (H, W) float in [0, 1]. Usually at the network input resolution.
+        cfg:           PostprocessConfig. Defaults used if None.
+        scale:         preprocessing scale factor (same in x and y). Set to the value
+                       you used to resize the original image into the padded canvas.
+                       Passing 1.0 means `prob_map` already sits in original coords.
+        pad:           (pad_left, pad_top) in prob-map pixels. The padding you added
+                       when building the square network input.
+        original_size: (orig_width, orig_height) in the ORIGINAL image. Same order as
+                       PIL's `img.size`. If given, boxes are clipped to it.
+
     Returns:
-        boxes:  list of (4, 2) float32 polygons in original image coords.
-        scores: list of per-box mean prob.
+        boxes:  list of (4, 2) float32 quads in ORIGINAL image coords.
+        scores: list of per-box mean probabilities.
     """
     cfg = cfg or PostprocessConfig()
-    net_h, net_w = prob_map.shape
-    orig_h, orig_w = original_size
+    pad_x, pad_y = float(pad[0]), float(pad[1])
+    inv_scale = 1.0 / max(float(scale), 1e-8)
 
-    mask = (prob_map > cfg.thresh).astype(np.uint8) * 255
-    contours, _ = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    contours = contours[: cfg.max_candidates]
+    mask = prob_map > cfg.thresh
+    labels, num = nd_label(mask)
 
     boxes: list[np.ndarray] = []
     scores: list[float] = []
-    for c in contours:
-        if len(c) < 3:
-            continue
-        c = c.reshape(-1, 2)
 
-        # score filter on the raw contour
-        s = _mean_score(prob_map, c)
+    for i in range(1, num + 1):
+        if len(boxes) >= cfg.max_candidates:
+            break
+
+        region = labels == i
+        area = int(region.sum())
+        if area < cfg.min_size * cfg.min_size:
+            continue
+
+        # mean probability inside the component
+        s = float(prob_map[region].mean())
         if s < cfg.box_thresh:
             continue
 
-        # minAreaRect on the raw contour (cheap, gives initial size check)
-        _, short_side = _min_rect_quad(c)
-        if short_side < cfg.min_size:
+        # fit a rotated rectangle to all foreground pixels of this component
+        ys, xs = np.where(region)
+        pts = np.stack([xs, ys], axis=1).astype(np.float32)     # (N, 2) in (x, y)
+        rect0 = _min_rotated_rect(pts)
+        if rect0 is None or _rect_short_side(rect0) < cfg.min_size:
             continue
 
-        # unclip and fit quad to the expanded polygon
-        expanded = _unclip(c, cfg.unclip_ratio)
+        # grow the rectangle by the DB unclip distance
+        expanded = _unclip(rect0, cfg.unclip_ratio)
         if expanded is None:
             continue
-        quad, short_side2 = _min_rect_quad(expanded.reshape(-1, 2))
-        if short_side2 < cfg.min_size + 2:
+
+        # final rotated rectangle around the expanded polygon
+        rect1 = _min_rotated_rect(expanded)
+        if rect1 is None or _rect_short_side(rect1) < cfg.min_size + 2:
             continue
 
-        # rescale to original resolution
-        quad = quad.astype(np.float32)
-        quad[:, 0] = np.clip(quad[:, 0] / net_w * orig_w, 0, orig_w - 1)
-        quad[:, 1] = np.clip(quad[:, 1] / net_h * orig_h, 0, orig_h - 1)
+        # prob-map coords -> original image coords
+        quad = rect1.copy()
+        quad[:, 0] = (quad[:, 0] - pad_x) * inv_scale
+        quad[:, 1] = (quad[:, 1] - pad_y) * inv_scale
 
-        boxes.append(quad)
+        if original_size is not None:
+            ow, oh = original_size
+            quad[:, 0] = np.clip(quad[:, 0], 0, ow - 1)
+            quad[:, 1] = np.clip(quad[:, 1], 0, oh - 1)
+
+        boxes.append(quad.astype(np.float32))
         scores.append(s)
 
     return boxes, scores

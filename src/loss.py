@@ -86,31 +86,35 @@ class DBLoss(nn.Module):
 
     def forward(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> dict:
         cfg = self.cfg
-        prob = preds["prob"]
-        thresh = preds["thresh"]
-        binary = preds.get("binary")
+        # F.binary_cross_entropy is autocast-unsafe; compute the whole loss in fp32.
+        device_type = preds["prob"].device.type
+        with torch.amp.autocast(device_type=device_type, enabled=False):
+            prob = preds["prob"].float()
+            thresh = preds["thresh"].float()
+            binary = preds["binary"].float() if preds.get("binary") is not None else None
 
-        # (B, H, W) -> (B, 1, H, W)
-        prob_map = batch["prob_map"].unsqueeze(1)
-        prob_mask = batch["prob_mask"].unsqueeze(1)
-        thresh_map = batch["thresh_map"].unsqueeze(1)
-        thresh_mask = batch["thresh_mask"].unsqueeze(1)
-        score_map = batch["score_map"].unsqueeze(1) if cfg.score_weighting else None
+            # (B, H, W) -> (B, 1, H, W)
+            prob_map = batch["prob_map"].float().unsqueeze(1)
+            prob_mask = batch["prob_mask"].float().unsqueeze(1)
+            thresh_map = batch["thresh_map"].float().unsqueeze(1)
+            thresh_mask = batch["thresh_mask"].float().unsqueeze(1)
+            score_map = batch["score_map"].float().unsqueeze(1) if cfg.score_weighting else None
 
-        l_bce = ohem_bce(prob, prob_map, prob_mask,
-                         neg_pos_ratio=cfg.ohem_ratio,
-                         per_pixel_weight=score_map)
-        l_dice = dice_loss(prob, prob_map, prob_mask, per_pixel_weight=score_map)
-        l_s = cfg.bce_weight * l_bce + cfg.dice_weight * l_dice
+            l_bce = ohem_bce(prob, prob_map, prob_mask,
+                             neg_pos_ratio=cfg.ohem_ratio,
+                             per_pixel_weight=score_map)
+            l_dice = dice_loss(prob, prob_map, prob_mask, per_pixel_weight=score_map)
+            l_s = cfg.bce_weight * l_bce + cfg.dice_weight * l_dice
 
-        l_t = masked_l1(thresh, thresh_map, thresh_mask)
+            l_t = masked_l1(thresh, thresh_map, thresh_mask)
 
-        if binary is not None:
-            l_b = dice_loss(binary, prob_map, prob_mask, per_pixel_weight=score_map)
-        else:
-            l_b = torch.zeros((), device=prob.device)
+            if binary is not None:
+                l_b = dice_loss(binary, prob_map, prob_mask, per_pixel_weight=score_map)
+            else:
+                l_b = torch.zeros((), device=prob.device)
 
-        total = cfg.alpha * l_s + cfg.beta * l_t + l_b
+            total = cfg.alpha * l_s + cfg.beta * l_t + l_b
+
         return {
             "loss": total,
             "l_s": l_s.detach(),

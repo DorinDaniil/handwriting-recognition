@@ -43,7 +43,7 @@ def draw_polygons(
     image: np.ndarray,
     polygons: list[np.ndarray],
     scores: list[float] | None = None,
-    thickness: int = 2,
+    thickness: int = 4,
 ) -> np.ndarray:
     """Draw polygons on a (H, W, 3) uint8 RGB image. Returns a new image."""
     out = image.copy()
@@ -63,7 +63,7 @@ def denormalize(image_chw: torch.Tensor,
                 mean: tuple[float, float, float] = (0.485, 0.456, 0.406),
                 std: tuple[float, float, float] = (0.229, 0.224, 0.225)) -> np.ndarray:
     """Reverse Normalize, return (H, W, 3) uint8 RGB."""
-    img = image_chw.detach().cpu().numpy()
+    img = image_chw
     img = np.transpose(img, (1, 2, 0))
     img = img * np.array(std, dtype=np.float32) + np.array(mean, dtype=np.float32)
     img = np.clip(img * 255.0, 0, 255).astype(np.uint8)
@@ -134,6 +134,6 @@ class ModelEMA:
         msd = model.state_dict()
         for k, v in self.module.state_dict().items():
             if v.dtype.is_floating_point:
-                v.mul_(d).add_(msd[k].detach(), alpha=1.0 - d)
+                v.mul_(d).add_(msd[k], alpha=1.0 - d)
             else:
                 v.copy_(msd[k])

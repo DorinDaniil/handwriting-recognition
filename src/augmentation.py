@@ -1,14 +1,17 @@
-"""Augmentation pipeline for DBNet++ training on handwriting.
+"""Augmentation pipeline for DBNet++ training.
 
-Polygons are transformed as keypoints (flattened vertices) to keep geometry
-consistent with the image. Two tiers:
+Deliberately simple and polygon-safe:
+    - discrete geometry only (90/180/270 rotations + horizontal/vertical flips).
+      Continuous affine rotations, random scale+crop, elastic and perspective
+      are intentionally avoided — they tend to drift pseudo-labels even when
+      keypoints technically follow.
+    - mild photometric: color jitter, light blur, light noise.
 
-    - standard     : DBNet-style basic geometric + photometric.
-    - handwriting  : adds perspective, elastic, shadow, paper-like textures,
-                     ink-fade, coarse blurs — useful when pages vary in
-                     lighting, scanning quality, and pen pressure.
-
-A 'none' tier only resizes and normalizes (validation / inference).
+Tiers:
+    - none         : resize + pad + normalize (validation / inference).
+    - standard     : resize + pad + discrete rotate/flip + mild color/blur/noise.
+    - handwriting  : alias of standard for now; kept separate so you can
+                     strengthen it later without breaking configs.
 """
 from __future__ import annotations
 
@@ -26,67 +29,20 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 
 @dataclass
 class AugConfig:
-    tier: str = "handwriting"
+    tier: str = "standard"
     image_size: int = 640
-    rotate_deg: float = 10.0
-    scale_range: tuple[float, float] = (0.6, 1.4)
-    box_jitter_px: float = 2.0
-    p_elastic: float = 0.2
-    p_perspective: float = 0.3
-    p_shadow: float = 0.2
-    p_paper_texture: float = 0.15
-    p_ink_fade: float = 0.15
-    p_blur: float = 0.3
-    p_noise: float = 0.3
-    p_color_jitter: float = 0.5
+    # geometry — discrete only
+    p_rot90: float = 0.75
+    p_hflip: float = 0.5
+    p_vflip: float = 0.5
+    # photometric — kept mild
+    p_color_jitter: float = 0.4
+    p_blur: float = 0.15
+    p_noise: float = 0.15
+    # tiny vertex jitter (0 = off) — can absorb a bit of teacher noise
+    box_jitter_px: float = 0.0
     mean: tuple[float, float, float] = field(default_factory=lambda: IMAGENET_MEAN)
     std: tuple[float, float, float] = field(default_factory=lambda: IMAGENET_STD)
-
-
-# --- custom transforms ----------------------------------------------------
-
-class PaperTexture(A.ImageOnlyTransform):
-    """Multiply a low-frequency noise map to mimic paper grain / uneven lighting."""
-
-    def __init__(self, strength: float = 0.15, p: float = 0.15):
-        super().__init__(p=p)
-        self.strength = strength
-
-    def apply(self, img: np.ndarray, **params) -> np.ndarray:
-        h, w = img.shape[:2]
-        low = np.random.rand(max(h // 32, 4), max(w // 32, 4)).astype(np.float32)
-        low = cv2.GaussianBlur(low, (0, 0), sigmaX=3)
-        low = cv2.resize(low, (w, h), interpolation=cv2.INTER_LINEAR)
-        low = 1.0 + self.strength * (2 * low - 1)
-        out = img.astype(np.float32) * low[..., None]
-        return np.clip(out, 0, 255).astype(img.dtype)
-
-    def get_transform_init_args_names(self) -> tuple[str, ...]:
-        return ("strength",)
-
-
-class InkFade(A.ImageOnlyTransform):
-    """Increase brightness in a smooth region — simulates faded/thin ink strokes."""
-
-    def __init__(self, p: float = 0.15):
-        super().__init__(p=p)
-
-    def apply(self, img: np.ndarray, **params) -> np.ndarray:
-        h, w = img.shape[:2]
-        cx = np.random.randint(0, w)
-        cy = np.random.randint(0, h)
-        radius = np.random.randint(min(h, w) // 6, min(h, w) // 2)
-        yy, xx = np.ogrid[:h, :w]
-        d = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
-        mask = np.clip(1.0 - d / max(radius, 1), 0, 1).astype(np.float32)
-        mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=radius / 3 + 1)
-        out = img.astype(np.float32)
-        lift = 60.0 * mask[..., None]
-        out = np.clip(out + lift, 0, 255)
-        return out.astype(img.dtype)
-
-    def get_transform_init_args_names(self) -> tuple[str, ...]:
-        return ()
 
 
 # --- pipeline factory -----------------------------------------------------
@@ -106,110 +62,37 @@ def _pad_if_needed(size: int) -> A.BasicTransform:
                              border_mode=cv2.BORDER_CONSTANT, value=0, p=1.0)
 
 
-def _affine(cfg: AugConfig) -> A.BasicTransform:
-    try:
-        return A.Affine(
-            rotate=(-cfg.rotate_deg, cfg.rotate_deg),
-            scale=cfg.scale_range,
-            translate_percent=(0.0, 0.05),
-            border_mode=cv2.BORDER_CONSTANT,
-            fill=0,
-            p=0.9,
-        )
-    except TypeError:
-        return A.Affine(
-            rotate=(-cfg.rotate_deg, cfg.rotate_deg),
-            scale=cfg.scale_range,
-            translate_percent=(0.0, 0.05),
-            mode=cv2.BORDER_CONSTANT,
-            cval=0,
-            p=0.9,
-        )
-
-
-def _random_crop(size: int) -> A.BasicTransform:
-    try:
-        return A.RandomCrop(height=size, width=size, pad_if_needed=True, p=1.0)
-    except TypeError:
-        return A.RandomCrop(height=size, width=size, p=1.0)
-
-
-def _base_geometric(cfg: AugConfig) -> list[A.BasicTransform]:
-    size = cfg.image_size
-    # Keep aspect, then pad to square, then random crop of size×size.
+def _geometric(cfg: AugConfig) -> list[A.BasicTransform]:
+    """Resize + pad to square, then discrete rotations and flips only."""
     return [
-        A.LongestMaxSize(max_size=int(size * cfg.scale_range[1]), p=1.0),
-        _pad_if_needed(size),
-        _affine(cfg),
-        _random_crop(size),
+        A.LongestMaxSize(max_size=cfg.image_size, p=1.0),
+        _pad_if_needed(cfg.image_size),
+        A.RandomRotate90(p=cfg.p_rot90),
+        A.HorizontalFlip(p=cfg.p_hflip),
+        A.VerticalFlip(p=cfg.p_vflip),
     ]
 
 
 def _photometric(cfg: AugConfig) -> list[A.BasicTransform]:
     blur_group = A.OneOf(
         [
-            A.GaussianBlur(blur_limit=(3, 7)),
-            A.MotionBlur(blur_limit=7),
-            A.MedianBlur(blur_limit=5),
+            A.GaussianBlur(blur_limit=(3, 5)),
+            A.MotionBlur(blur_limit=5),
         ],
         p=cfg.p_blur,
     )
-    # GaussNoise / ImageCompression kwargs renamed across albumentations versions
+    # GaussNoise kwargs renamed across albumentations versions
     try:
-        gn = A.GaussNoise(std_range=(0.02, 0.1))
+        gn = A.GaussNoise(std_range=(0.01, 0.04))
     except TypeError:
-        gn = A.GaussNoise(var_limit=(10.0, 50.0))
-    try:
-        ic = A.ImageCompression(quality_range=(50, 95))
-    except TypeError:
-        ic = A.ImageCompression(quality_lower=50, quality_upper=95)
-    noise_group = A.OneOf([gn, A.ISONoise(), ic], p=cfg.p_noise)
+        gn = A.GaussNoise(var_limit=(5.0, 20.0))
+    noise_group = A.OneOf([gn, A.ISONoise()], p=cfg.p_noise)
     return [
-        A.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.05,
+        A.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1, hue=0.02,
                       p=cfg.p_color_jitter),
         A.ToGray(p=0.05),
         blur_group,
         noise_group,
-    ]
-
-
-def _shadow() -> A.BasicTransform:
-    """Build a RandomShadow compatible with both old and new albumentations APIs."""
-    if not hasattr(A, "RandomShadow"):
-        return A.NoOp()
-    try:
-        return A.RandomShadow(
-            shadow_roi=(0.0, 0.0, 1.0, 1.0),
-            num_shadows_limit=(1, 2),
-            shadow_dimension=5,
-            p=1.0,
-        )
-    except TypeError:
-        return A.RandomShadow(
-            shadow_roi=(0.0, 0.0, 1.0, 1.0),
-            num_shadows_lower=1,
-            num_shadows_upper=2,
-            shadow_dimension=5,
-            p=1.0,
-        )
-
-
-def _perspective(p: float) -> A.BasicTransform:
-    """A.Perspective args renamed between versions; fall back gracefully."""
-    try:
-        return A.Perspective(scale=(0.02, 0.06), pad_mode=cv2.BORDER_CONSTANT,
-                             pad_val=0, p=p)
-    except TypeError:
-        return A.Perspective(scale=(0.02, 0.06), p=p)
-
-
-def _handwriting_extra(cfg: AugConfig) -> list[A.BasicTransform]:
-    return [
-        _perspective(cfg.p_perspective),
-        A.ElasticTransform(alpha=30, sigma=6, p=cfg.p_elastic),
-        A.OneOf([_shadow()], p=cfg.p_shadow),
-        PaperTexture(strength=0.18, p=cfg.p_paper_texture),
-        InkFade(p=cfg.p_ink_fade),
     ]
 
 
@@ -225,12 +108,9 @@ def build_transform(cfg: AugConfig, train: bool) -> A.Compose:
             _pad_if_needed(cfg.image_size),
             *_normalize(cfg),
         ]
-    elif cfg.tier == "standard":
-        ops = [*_base_geometric(cfg), *_photometric(cfg), *_normalize(cfg)]
-    elif cfg.tier == "handwriting":
+    elif cfg.tier in ("standard", "handwriting"):
         ops = [
-            *_base_geometric(cfg),
-            *_handwriting_extra(cfg),
+            *_geometric(cfg),
             *_photometric(cfg),
             *_normalize(cfg),
         ]

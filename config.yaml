@@ -15,25 +15,21 @@ data:
   val_fraction: 0.1
   min_score: 0.5              # drop pseudo-boxes below this
   image_size: 640             # square input
-  batch_size: 8
+  batch_size: 16
   num_workers: 4
   pin_memory: true
 
 aug:
-  tier: handwriting           # one of: none | standard | handwriting
-  # probabilities for handwriting tier
-  p_elastic: 0.2
-  p_perspective: 0.3
-  p_shadow: 0.2
-  p_paper_texture: 0.15
-  p_ink_fade: 0.15
-  p_blur: 0.3
-  p_noise: 0.3
-  p_color_jitter: 0.5
-  # geometric
-  rotate_deg: 10
-  scale_range: [0.6, 1.4]
-  box_jitter_px: 2            # random px jitter on polygon vertices (absorbs teacher noise)
+  tier: standard              # one of: none | standard | handwriting
+  # discrete geometry only — safe for pseudo-labels
+  p_rot90: 0.75               # random 0/90/180/270 rotation
+  p_hflip: 0.5
+  p_vflip: 0.5
+  # mild photometric
+  p_color_jitter: 0.4
+  p_blur: 0.15
+  p_noise: 0.15
+  box_jitter_px: 0            # tiny vertex jitter; 0 disables
 
 target:
   shrink_ratio: 0.4           # Vatti shrink for positive region
