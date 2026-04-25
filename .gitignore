@@ -207,7 +207,6 @@ marimo/_lsp/
 __marimo__/
 
 
-labels/
 data/
 outputs/
-splits/
+labels/
