@@ -14,6 +14,7 @@ This dataset:
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Sequence
 
@@ -22,8 +23,33 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from .augmentation import Augmenter, AugConfig
+from .augmentation import Augmenter, AugConfig, SyntheticPaperAugmenter
 from .target_gen import TargetConfig, _shrink_polygon, generate_targets
+
+logger = logging.getLogger(__name__)
+
+
+def expand_polygon_height(poly: np.ndarray, fraction: float, image_shape: tuple[int, int]) -> np.ndarray:
+    """Expand a text polygon along its short rotated-rect axis."""
+    if fraction <= 0 or len(poly) < 3:
+        return poly
+    rect = cv2.minAreaRect(poly.astype(np.float32))
+    (_, _), (w, h), angle = rect
+    if w < 1 or h < 1:
+        return poly
+    theta = np.deg2rad(angle)
+    width_axis = np.array([np.cos(theta), np.sin(theta)], dtype=np.float32)
+    height_axis = np.array([-np.sin(theta), np.cos(theta)], dtype=np.float32)
+    normal = height_axis if h <= w else width_axis
+    center = poly.mean(axis=0)
+    signs = np.sign((poly - center) @ normal).astype(np.float32)
+    signs[signs == 0] = 1.0
+    delta = min(w, h) * float(fraction)
+    expanded = poly.astype(np.float32) + signs[:, None] * normal[None, :] * delta
+    image_h, image_w = image_shape
+    expanded[:, 0] = np.clip(expanded[:, 0], 0, image_w - 1)
+    expanded[:, 1] = np.clip(expanded[:, 1], 0, image_h - 1)
+    return expanded.astype(np.float32)
 
 
 def parse_labels_txt(labels_txt: Path) -> list[tuple[str, list[dict]]]:
@@ -59,12 +85,21 @@ class PaddleOCRDetDataset(Dataset):
         split_file: str | Path | None = None,
         min_score: float = 0.0,
         train: bool = True,
+        synthetic_paper_aug: bool = False,
+        table_backgrounds_dir: str | Path | None = None,
+        skip_main_train_geometry: bool = False,
     ):
         self.root = Path(dataset_root)
         self.min_score = min_score
         self.train = train
         self.target_cfg = target_cfg
-        self.augmenter = Augmenter(aug_cfg, train=train)
+        self.aug_cfg = aug_cfg
+        self.augmenter = Augmenter(aug_cfg, train=(train and not skip_main_train_geometry))
+        self.synthetic_paper_augmenter = (
+            SyntheticPaperAugmenter(aug_cfg.image_size, table_backgrounds_dir)
+            if train and synthetic_paper_aug
+            else None
+        )
 
         all_items = parse_labels_txt(Path(labels_txt))
         allowed = read_split(Path(split_file) if split_file else None)
@@ -77,6 +112,8 @@ class PaddleOCRDetDataset(Dataset):
 
     def _load_image(self, rel: str) -> np.ndarray:
         abs_path = self.root / rel
+        if not abs_path.exists():
+            raise FileNotFoundError(abs_path)
         img = cv2.imread(str(abs_path), cv2.IMREAD_COLOR)
         if img is None:
             # fall back to PIL for odd extensions / unicode paths
@@ -106,12 +143,34 @@ class PaddleOCRDetDataset(Dataset):
         return len(self.items)
 
     def __getitem__(self, idx: int) -> dict:
-        rel, boxes = self.items[idx]
+        last_error: Exception | None = None
+        for offset in range(len(self.items)):
+            safe_idx = (idx + offset) % len(self.items)
+            rel, boxes = self.items[safe_idx]
+            try:
+                return self._getitem_loaded(rel, boxes)
+            except (FileNotFoundError, OSError, ValueError) as exc:
+                last_error = exc
+                if offset < 5:
+                    logger.warning("skip unreadable image %s: %s", self.root / rel, exc)
+                continue
+        raise RuntimeError("No readable images left in dataset") from last_error
+
+    def _getitem_loaded(self, rel: str, boxes: list[dict]) -> dict:
         image = self._load_image(rel)
         polys, scores = self._filter_boxes(boxes)
 
+        if self.synthetic_paper_augmenter is not None:
+            image, polys, pre_keep = self.synthetic_paper_augmenter(image, polys)
+            scores = [s for s, k in zip(scores, pre_keep) if k]
+
         image_t, polys_t, keep = self.augmenter(image, polys)
         scores_t = [s for s, k in zip(scores, keep) if k]
+        if self.aug_cfg.box_expand_height_fraction > 0:
+            polys_t = [
+                expand_polygon_height(poly, self.aug_cfg.box_expand_height_fraction, image_t.shape[:2])
+                for poly in polys_t
+            ]
 
         h, w = image_t.shape[:2]
         targets = generate_targets(

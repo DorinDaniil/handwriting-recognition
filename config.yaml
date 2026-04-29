@@ -12,12 +12,22 @@ data:
   splits_dir: splits
   train_split: splits/train.txt
   val_split: splits/val.txt
+  test_split: splits/test.txt
+  clean_splits: [splits/train_clean.txt, splits/val_clean.txt]
   val_fraction: 0.1
+  test_fraction: 0.0            # 0.0 keeps old train/val behavior; set e.g. 0.05 for held-out test
   min_score: 0.5              # drop pseudo-boxes below this
   image_size: 640             # square input
   batch_size: 16
   num_workers: 4
   pin_memory: true
+
+synthetic:
+  enabled: true
+  dataset_root: /home/sasha/Documents/CourseMIPT/MyFirstScientificWork/2026-Project-190/code/datasets/handwriting_recognition_synthetic_dataset
+  labels_txt: /home/sasha/Documents/CourseMIPT/MyFirstScientificWork/2026-Project-190/code/datasets/handwriting_recognition_synthetic_dataset/labels.txt
+  paper_aug: true
+  table_backgrounds_dir: /home/sasha/Documents/CourseMIPT/MyFirstScientificWork/2026-Project-190/code/datasets/local_table_dataset
 
 aug:
   tier: standard              # one of: none | standard | handwriting
@@ -30,6 +40,7 @@ aug:
   p_blur: 0.15
   p_noise: 0.15
   box_jitter_px: 0            # tiny vertex jitter; 0 disables
+  box_expand_height_fraction: 0.05  # expand each text polygon by 5% of its short side
 
 target:
   shrink_ratio: 0.4           # Vatti shrink for positive region
