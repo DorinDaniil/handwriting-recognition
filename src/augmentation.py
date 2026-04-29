@@ -157,16 +157,16 @@ class SyntheticPaperAugmenter:
                 A.OneOf(
                     [
                         A.RandomShadow(
-                            shadow_roi=(0, 0, 1, 1),
+                            shadow_roi=(0.15, 0.15, 0.85, 0.85),
                             num_shadows_limit=(1, 1),
-                            shadow_dimension=6,
-                            shadow_intensity_range=(0.08, 0.16),
+                            shadow_dimension=3,
+                            shadow_intensity_range=(0.08, 0.18),
                             p=1,
                         ),
                         A.RandomShadow(
-                            shadow_roi=(0, 0, 1, 1),
+                            shadow_roi=(0.20, 0.20, 0.80, 0.80),
                             num_shadows_limit=(1, 1),
-                            shadow_dimension=3,
+                            shadow_dimension=4,
                             shadow_intensity_range=(0.10, 0.22),
                             p=1,
                         ),
@@ -184,49 +184,49 @@ class SyntheticPaperAugmenter:
                         ),
                         A.Defocus(
                             radius=(1, 2),
-                            alias_blur=(0.01, 0.03),
+                            alias_blur=(0.005, 0.01),
                             p=1,
                         ),
                     ],
                     p=1,
                 ),
             ],
-            p=0.65,
+            p=1, #0.6
         )
-        squares = [(0, 0, 0.5, 0.5), (0.5, 0, 1, 0.5), (0, 0.5, 0.5, 1), (0.5, 0.5, 1, 1)]
-        transforms_squares_list: list[A.BasicTransform] = []
-        for roi in squares:
-            transforms_squares_list.append(
-                A.RandomShadow(
-                    shadow_roi=roi,
-                    num_shadows_limit=(1, 1),
-                    shadow_dimension=7,
-                    shadow_intensity_range=(0.06, 0.16),
-                    p=1,
-                )
-            )
-            transforms_squares_list.append(
-                A.RandomSunFlare(
-                    flare_roi=roi,
-                    src_radius=100,
-                    src_color=(200, 200, 200),
-                    p=1,
-                )
-            )
-            transforms_squares_list.append(A.Defocus(radius=(1, 2), alias_blur=(0.01, 0.03), p=1))
-        transforms_squares = A.OneOf(
-            [A.SomeOf(transforms_squares_list, n=1, p=1)] * 5
-            + [A.SomeOf(transforms_squares_list, n=2, p=1)] * 3
-            + [A.SomeOf(transforms_squares_list, n=3, p=1)] * 2,
-            p=1,
-        )
+        # squares = [(0, 0, 0.5, 0.5), (0.5, 0, 1, 0.5), (0, 0.5, 0.5, 1), (0.5, 0.5, 1, 1)]
+        # transforms_squares_list: list[A.BasicTransform] = []
+        # for roi in squares:
+        #     transforms_squares_list.append(
+        #         A.RandomShadow(
+        #             shadow_roi=roi,
+        #             num_shadows_limit=(1, 1),
+        #             shadow_dimension=7,
+        #             shadow_intensity_range=(0.06, 0.16),
+        #             p=1,
+        #         )
+        #     )
+        #     transforms_squares_list.append(
+        #         A.RandomSunFlare(
+        #             flare_roi=roi,
+        #             src_radius=120,
+        #             src_color=(255, 255, 255),
+        #             p=1,
+        #         )
+        #     )
+        #     transforms_squares_list.append(A.Defocus(radius=(1, 2), alias_blur=(0.01, 0.03), p=1))
+        # transforms_squares = A.OneOf(
+        #     [A.SomeOf(transforms_squares_list, n=1, p=1)] * 5
+        #     + [A.SomeOf(transforms_squares_list, n=2, p=1)] * 3
+        #     + [A.SomeOf(transforms_squares_list, n=3, p=1)] * 2,
+        #     p=1,
+        # )
         return A.OneOf(
             [
-                A.Compose([all_image], p=0.4),
-                A.Compose([transforms_squares], p=0.5),
-                A.Compose([transforms_squares, all_image], p=0.1),
+                A.Compose([all_image], p=1),
+                # A.Compose([transforms_squares], p=0.5),
+                # A.Compose([transforms_squares, all_image], p=0.1),
             ],
-            p=1,
+            p=0.7,
         )
 
     def _random_table_background(self, height: int, width: int) -> np.ndarray | None:
