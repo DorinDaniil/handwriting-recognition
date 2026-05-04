@@ -29,6 +29,7 @@ def build_aug_cfg(cfg) -> AugConfig:
         p_blur=a.p_blur,
         p_noise=a.p_noise,
         box_jitter_px=a.box_jitter_px,
+        box_expand_height_fraction=a.get("box_expand_height_fraction", 0.0),
     )
 
 
@@ -65,7 +66,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Debug synthetic paper augmentation used during DBNet training.")
     parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "config.yaml")
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "debug_synthetic_augmentation")
-    parser.add_argument("--count", type=int, default=8)
+    parser.add_argument("--count", type=int, default=100)
     parser.add_argument("--start-index", type=int, default=0)
     return parser.parse_args()
 
@@ -88,6 +89,7 @@ def main() -> None:
         train=True,
         synthetic_paper_aug=bool(synthetic_cfg.get("paper_aug", True)),
         table_backgrounds_dir=synthetic_cfg.get("table_backgrounds_dir", None),
+        skip_main_train_geometry=True,
     )
 
     for i in range(args.count):
