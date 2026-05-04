@@ -77,7 +77,7 @@ class SyntheticPaperAugmenter:
             return A.Affine(
                 scale=(0.9, 1.1),
                 translate_percent=(-0.0625, 0.0625),
-                rotate=(-30, 30),
+                rotate=(-7, 7),
                 fit_output=True,
                 border_mode=cv2.BORDER_CONSTANT,
                 fill=255,
@@ -88,7 +88,7 @@ class SyntheticPaperAugmenter:
             return A.ShiftScaleRotate(
                 shift_limit=(-0.0625, 0.0625),
                 scale_limit=(-0.1, 0.1),
-                rotate_limit=(-30, 30),
+                rotate_limit=(-7, 7),
                 border_mode=cv2.BORDER_CONSTANT,
                 value=255,
                 mask_value=0,
@@ -103,14 +103,14 @@ class SyntheticPaperAugmenter:
                         A.Compose(
                             [
                                 A.RandomRotate90(p=1),
-                                A.HorizontalFlip(p=0.5),
+                                #A.HorizontalFlip(p=0.5),
                             ],
                             p=0.4,
                         ),
                         A.Compose(
                             [
                                 self._affine_no_crop(),
-                                A.HorizontalFlip(p=0.5),
+                                #A.HorizontalFlip(p=0.5),
                             ],
                             p=0.6,
                         ),
@@ -182,11 +182,11 @@ class SyntheticPaperAugmenter:
                             brightness_by_max=False,
                             p=1,
                         ),
-                        A.Defocus(
-                            radius=(1, 2),
-                            alias_blur=(0.005, 0.01),
-                            p=1,
-                        ),
+                        # A.Defocus(
+                        #     radius=(1, 2),
+                        #     alias_blur=(0.005, 0.01),
+                        #     p=1,
+                        # ),
                     ],
                     p=1,
                 ),
