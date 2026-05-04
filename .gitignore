@@ -210,3 +210,5 @@ __marimo__/
 data/
 outputs/
 labels/
+debug_synthetic_augmentation/
+debug_synthetic_augmentation.zip
