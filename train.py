@@ -154,15 +154,22 @@ def main() -> None:
     val_aug = AugConfig(**{**train_aug.__dict__, "tier": "none"})
     target_cfg = _build_target_cfg(cfg)
 
-    train_set = PaddleOCRDetDataset(
-        dataset_root=cfg.data.dataset_root,
-        labels_txt=cfg.data.labels_txt,
-        aug_cfg=train_aug,
-        target_cfg=target_cfg,
-        split_file=cfg.data.train_split,
-        min_score=cfg.data.min_score,
-        train=True,
-    )
+    train_sets = []
+    if bool(cfg.data.get("train_enabled", True)):
+        train_set = PaddleOCRDetDataset(
+            dataset_root=cfg.data.dataset_root,
+            labels_txt=cfg.data.labels_txt,
+            aug_cfg=train_aug,
+            target_cfg=target_cfg,
+            split_file=cfg.data.train_split,
+            min_score=cfg.data.min_score,
+            train=True,
+        )
+        logger.info(f"real dataset: train={len(train_set)}")
+        train_sets.append(train_set)
+    else:
+        logger.info("real dataset: disabled by data.train_enabled=false")
+
     synthetic_cfg = cfg.get("synthetic", {})
     if bool(synthetic_cfg.get("enabled", False)):
         synthetic_set = PaddleOCRDetDataset(
@@ -178,7 +185,11 @@ def main() -> None:
             skip_main_train_geometry=True,
         )
         logger.info(f"synthetic dataset: train={len(synthetic_set)}")
-        train_set = ConcatDataset([train_set, synthetic_set])
+        train_sets.append(synthetic_set)
+    if len(train_sets) == 0:
+        raise RuntimeError("No training datasets enabled: set data.train_enabled=true or synthetic.enabled=true")
+    train_set = train_sets[0] if len(train_sets) == 1 else ConcatDataset(train_sets)
+
     val_set = PaddleOCRDetDataset(
         dataset_root=cfg.data.dataset_root,
         labels_txt=cfg.data.labels_txt,

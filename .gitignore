@@ -212,3 +212,4 @@ outputs/
 labels/
 debug_synthetic_augmentation/
 debug_synthetic_augmentation.zip
+splits/

@@ -7,6 +7,7 @@ experiment:
   seed: 42
 
 data:
+  train_enabled: true
   dataset_root: /mnt/DATA2/seilov/hw_dataset/hw_dataset
   labels_txt: labels/labels.txt
   splits_dir: splits
