@@ -23,11 +23,12 @@ from src.synth import HandwrittenLineGenerator, make_generator
 
 gen = HandwrittenLineGenerator.from_dirs(text_dirs=["/path/txt1", "/path/txt2"],
                                          font_dirs="assets/fonts")
-img, text = gen.sample(make_generator(42, 0, 0), step=10000)   # (PIL 384x384, "строка")
+img, text = gen.sample(make_generator(42, 0, 0), step=10000)   # (PIL RGB, короткая сторона 224, "строка")
 ```
 Тексты берутся из папок с `.txt` (`text_dirs`): случайный обход файлов, строки бегущего
 текста разной длины, перенос на границе слова. Без `text_dirs` — встроенный словарь.
-`render_line()` отдаёт строку натурального размера, `sample()` — letterbox 384x384 под TrOCR.
+`sample()` отдаёт тугой кроп строки на бумаге (короткая сторона `output.min_side`=224,
+натуральный аспект, без белых полей); для квадратного входа TrOCR оберни в `fit_to_square`.
 
 ## Структура src/synth
 ```
@@ -44,7 +45,7 @@ assets.py       сканирование шрифтов, кэш покрытия
 
 ## Конфиг
 `SynthConfig` — вложенные dataclass. Часто меняемое: `corpus.text_dirs`, `corpus.len_chars`,
-`corpus.p_hyphenate`, `font.font_dirs`, `paper.p_grid`/`p_ruled`, `output.keep_aspect`,
+`corpus.p_hyphenate`, `font.font_dirs`, `paper.p_grid`/`p_ruled`, `output.min_side`,
 `warmup_steps`, `curriculum`. `build_synth_cfg(node)` собирает из OmegaConf.
 `step` в `sample(rng, step)` управляет сложностью: 0 — простые строки, `warmup_steps` — полная.
 

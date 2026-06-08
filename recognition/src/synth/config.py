@@ -126,8 +126,8 @@ class EffectsConfig:
     p_grid_distort: float = 0.20
     p_perspective: float = 0.25
     perspective_scale: tuple[float, float] = (0.02, 0.06)
-    p_affine_rotate: float = 0.5
-    affine_rotate_deg: tuple[float, float] = (-3.0, 3.0)
+    # NB: line slant/tilt is rendered into the ink layer (see render.py), so there is
+    # no image-level rotation here — that would add a white/blank frame around the line.
     p_baseline_curve: float = 0.15           # custom: sinusoidal row remap (albumentations has none)
     # photometric / capture
     p_blur: float = 0.30
@@ -145,12 +145,13 @@ class EffectsConfig:
 
 @dataclass
 class OutputConfig:
-    """How the line is delivered to the model."""
-    proc_size: int = 384                      # TrOCR square input
-    keep_aspect: bool = True                  # letterbox (pad), do NOT squash the aspect ratio
-    pad_color: RGB = (255, 255, 255)
-    max_aspect: float = 8.0                   # clamp extreme wide lines before letterboxing
-    min_height_px: int = 24                   # reject degenerate renders below this height
+    """The line is delivered as a TIGHT crop on its paper substrate — no white
+    letterbox/padding around it. The shorter side is scaled to ``min_side`` and the
+    aspect ratio is preserved, so wide lines stay wide and the text fills the frame."""
+    min_side: int = 224              # target shorter side in px (line is up/down-scaled to it)
+    max_side: int | None = 2400      # safety cap on the longer side (None = uncapped)
+    margin_frac: tuple[float, float] = (0.06, 0.22)  # paper around the ink, fraction of line height
+    min_height_px: int = 24          # reject degenerate renders below this (before the final resize) height
 
 
 @dataclass

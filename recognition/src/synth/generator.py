@@ -43,6 +43,22 @@ def fit_to_square(img: Image.Image, size: int, pad_color=(255, 255, 255),
     return canvas
 
 
+def resize_to_min_side(img: Image.Image, min_side: int = 224,
+                       max_side: int | None = 2400) -> Image.Image:
+    """Scale so the shorter side == ``min_side`` (aspect preserved, no padding).
+
+    This is the default output transform: it keeps the natural line aspect (wide
+    lines stay wide) and only resizes. ``max_side`` optionally caps the longer side
+    for very long lines (then the shorter side may end up below ``min_side``)."""
+    w, h = img.size
+    scale = min_side / max(1, min(w, h))
+    nw, nh = max(1, round(w * scale)), max(1, round(h * scale))
+    if max_side and max(nw, nh) > max_side:
+        s = max_side / max(nw, nh)
+        nw, nh = max(1, round(nw * s)), max(1, round(nh * s))
+    return img.resize((nw, nh), Image.BILINEAR)
+
+
 class HandwrittenLineGenerator:
     def __init__(self, cfg: SynthConfig | None = None, *, sampler=None, fonts=None,
                  renderer=None, paper=None, compositor=None, effects=None):
@@ -101,12 +117,13 @@ class HandwrittenLineGenerator:
         return self._fallback(rng)
 
     def sample(self, rng, step: int = 0):
-        """Return ``(PIL.Image RGB, str)`` ready for the processor."""
+        """Return ``(PIL.Image RGB, str)`` — a tight line crop on its paper, shorter
+        side scaled to ``output.min_side``. No white letterbox; aspect preserved.
+
+        (If you need a square TrOCR input, wrap the result with ``fit_to_square``.)"""
         img, text = self.render_line(rng, step)
         out = self.cfg.output
-        if out.keep_aspect:
-            img = fit_to_square(img, out.proc_size, out.pad_color, out.max_aspect)
-        return img, text
+        return resize_to_min_side(img, out.min_side, out.max_side), text
 
     __call__ = sample
 
@@ -124,12 +141,13 @@ class HandwrittenLineGenerator:
         if meta.get("empty") or ink.height < 2 or ink.width < 2:
             return None
 
-        mx = int(size * uniform(rng, (0.3, 1.4)))
-        my = int(size * uniform(rng, (0.3, 0.9)))
-        W, H = ink.width + 2 * mx, ink.height + 2 * my
+        mfrac = self.cfg.output.margin_frac
+        mw = max(2, int(ink.height * uniform(rng, mfrac)))
+        mh = max(2, int(ink.height * uniform(rng, mfrac)))
+        W, H = ink.width + 2 * mw, ink.height + 2 * mh
         paper = self.paper.make((W, H), rng, t)
-        ox = mx + int(uniform(rng, (-0.3, 0.3)) * mx)
-        oy = my + int(uniform(rng, (-0.3, 0.3)) * my)
+        ox = mw + int(uniform(rng, (-0.4, 0.4)) * mw)
+        oy = mh + int(uniform(rng, (-0.4, 0.4)) * mh)
         rgb = self.compositor.blend(paper, ink, (max(0, ox), max(0, oy)), rng, t)
         arr = self.effects(np.asarray(rgb), rng, t)
         img = Image.fromarray(arr)
@@ -143,13 +161,10 @@ class HandwrittenLineGenerator:
         text = entry.filter("пример текста") or "текст"
         font = self.fonts.get(entry, int(np.mean(self.cfg.font.sizes_px)))
         ink, _ = self.renderer.render(text, font, rng, 0.0)
-        mx, my = 16, 10
+        mx, my = 14, 10
         paper = Image.new("RGB", (ink.width + 2 * mx, ink.height + 2 * my),
-                          self.cfg.paper.paper_colors[0])
-        rgb = paper.convert("RGBA")
-        rgb.alpha_composite(ink, (mx, my))
-        img = rgb.convert("RGB")
-        if self.cfg.output.keep_aspect:
-            img = fit_to_square(img, self.cfg.output.proc_size,
-                                self.cfg.output.pad_color, self.cfg.output.max_aspect)
+                          self.cfg.paper.paper_colors[0]).convert("RGBA")
+        paper.alpha_composite(ink, (mx, my))
+        img = resize_to_min_side(paper.convert("RGB"),
+                                 self.cfg.output.min_side, self.cfg.output.max_side)
         return img, text

@@ -26,10 +26,14 @@ from .rng import chance, scale_p, uniform
 
 try:
     import albumentations as A
+    import cv2
     _HAS_ALBU = True
+    _BORDER = cv2.BORDER_REPLICATE          # extend paper at edges — never white/black
 except Exception:  # pragma: no cover
     A = None
+    cv2 = None
     _HAS_ALBU = False
+    _BORDER = 1
 
 
 # ============================ compositor ============================
@@ -84,25 +88,40 @@ class EffectsPipeline:
         if chance(rng, scale_p(cfg.p_baseline_curve, t)):
             img = self._baseline_curve(img, rng)
         if _HAS_ALBU:
+            # Line slant/tilt is already baked into the ink (render.py). These warp the
+            # whole line with paper-replicating borders, so no white frame appears.
             for p, key in ((cfg.p_elastic, "elastic"), (cfg.p_grid_distort, "grid"),
-                           (cfg.p_perspective, "persp"), (cfg.p_affine_rotate, "rot")):
-                if chance(rng, scale_p(p, t)):
-                    img = self._geo[key](image=img)["image"]
-        else:
-            if chance(rng, scale_p(cfg.p_affine_rotate, t)):
-                img = self._rotate_pil(img, rng)
+                           (cfg.p_perspective, "persp")):
+                tr = self._geo.get(key)
+                if tr is not None and chance(rng, scale_p(p, t)):
+                    img = tr(image=img)["image"]
         return img
 
     def _build_geo(self) -> dict:
         cfg = self.cfg
-        return {
-            "elastic": A.ElasticTransform(alpha=float(np.mean(cfg.elastic_alpha)),
-                                          sigma=float(np.mean(cfg.elastic_sigma)), p=1.0),
-            "grid": A.GridDistortion(num_steps=5, distort_limit=0.2, p=1.0),
-            "persp": A.Perspective(scale=cfg.perspective_scale, fit_output=True, p=1.0),
-            "rot": A.Affine(rotate=cfg.affine_rotate_deg, fit_output=True,
-                            mode=0, cval=255, p=1.0),
-        }
+        geo: dict = {}
+        try:
+            geo["elastic"] = A.ElasticTransform(alpha=float(np.mean(cfg.elastic_alpha)),
+                                                sigma=float(np.mean(cfg.elastic_sigma)),
+                                                border_mode=_BORDER, p=1.0)
+        except TypeError:
+            geo["elastic"] = A.ElasticTransform(alpha=float(np.mean(cfg.elastic_alpha)),
+                                                sigma=float(np.mean(cfg.elastic_sigma)), p=1.0)
+        try:
+            geo["grid"] = A.GridDistortion(num_steps=5, distort_limit=0.2,
+                                           border_mode=_BORDER, p=1.0)
+        except TypeError:
+            geo["grid"] = A.GridDistortion(num_steps=5, distort_limit=0.2, p=1.0)
+        # Perspective pads with black by default -> keep it only if the border can replicate.
+        geo["persp"] = None
+        for kw in ("border_mode", "pad_mode"):
+            try:
+                geo["persp"] = A.Perspective(scale=cfg.perspective_scale, fit_output=False,
+                                             p=1.0, **{kw: _BORDER})
+                break
+            except TypeError:
+                continue
+        return geo
 
     # ----------------------------------------------------- photometric
 
@@ -175,12 +194,6 @@ class EffectsPipeline:
         return np.clip(img.astype(np.float32) * factor, 0, 255).astype(np.uint8)
 
     # ----------------------------------------------------- fallback ops
-
-    @staticmethod
-    def _rotate_pil(img: np.ndarray, rng) -> np.ndarray:
-        ang = float(rng.uniform(-3.0, 3.0))
-        pil = Image.fromarray(img).rotate(ang, expand=True, resample=Image.BICUBIC, fillcolor=(255, 255, 255))
-        return np.asarray(pil)
 
     def _photometric_fallback(self, img: np.ndarray, rng, t: float) -> np.ndarray:
         cfg = self.cfg

@@ -27,7 +27,7 @@ from .config import (
 from .corpus import TextSampler
 from .effects import Compositor, EffectsPipeline
 from .fonts import FontBank, FontEntry
-from .generator import HandwrittenLineGenerator, fit_to_square
+from .generator import HandwrittenLineGenerator, fit_to_square, resize_to_min_side
 from .render import LineRenderer
 from .rng import make_generator
 
@@ -50,5 +50,6 @@ __all__ = [
     "Compositor",
     "EffectsPipeline",
     "fit_to_square",
+    "resize_to_min_side",
     "make_generator",
 ]
