@@ -20,7 +20,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from .config import RenderConfig
-from .rng import chance, eased_uniform, lerp, uniform
+from .rng import chance, eased_centered, eased_uniform, lerp, uniform
 
 
 class LineRenderer:
@@ -45,7 +45,7 @@ class LineRenderer:
         advances, jit = [], []
         for ch in text:
             advances.append(float(font.getlength(ch)) if ch != " " else float(font.getlength(" ")))
-            jit.append(1.0 + eased_uniform(rng, cfg.spacing_jitter, t))
+            jit.append(1.0 + eased_centered(rng, cfg.spacing_jitter, t))
         total_w = int(sum(a * j for a, j in zip(advances, jit))) + 2 * pad + glyph_h
         canvas_h = int(glyph_h * 1.6 + 2 * pad + wob_max)
         baseline_y = int(pad + ascent + 0.3 * glyph_h)
@@ -71,7 +71,8 @@ class LineRenderer:
                 canvas.alpha_composite(tile, (int(round(x)), max(0, wy)))
             x += adv * j
 
-        canvas = self._shear(canvas, eased_uniform(rng, cfg.slant_deg, t), baseline_y)
+        canvas = self._shear(canvas, eased_centered(rng, cfg.slant_deg, t), baseline_y)
+        canvas = self._rotate(canvas, eased_centered(rng, cfg.line_rotate_deg, t))
         canvas = self._apply_alpha(canvas, base_alpha, grain_amt, rng)
 
         bbox = canvas.getbbox()
@@ -120,6 +121,15 @@ class LineRenderer:
         out = canvas.transform((new_w, h), Image.AFFINE, (1.0, shear, -c, 0.0, 1.0, 0.0),
                                resample=Image.BICUBIC)
         return out
+
+    @staticmethod
+    def _rotate(canvas: Image.Image, deg: float) -> Image.Image:
+        """Small whole-line tilt. Rotates the transparent RGBA ink layer (expand=True);
+        the new corners stay transparent, so paper fills them after compositing — no
+        white frame. This is the line slant (наклон строки)."""
+        if abs(deg) < 0.2:
+            return canvas
+        return canvas.rotate(deg, expand=True, resample=Image.BICUBIC)
 
     @staticmethod
     def _apply_alpha(canvas: Image.Image, base_alpha: float, grain_amt: float, rng) -> Image.Image:

@@ -78,7 +78,8 @@ class RenderConfig:
     )
     p_pencil: float = 0.25                    # lower alpha + more grain (pencil look)
     baseline_wobble_px: tuple[float, float] = (0.0, 2.5)   # smooth vertical undulation amplitude
-    slant_deg: tuple[float, float] = (-8.0, 12.0)          # line-level shear, mostly right-leaning
+    slant_deg: tuple[float, float] = (-8.0, 12.0)          # italic shear (handwriting slant), per line
+    line_rotate_deg: tuple[float, float] = (-3.0, 3.0)     # small whole-line tilt; baked into ink, no white frame
     per_glyph_rot_deg: tuple[float, float] = (-4.0, 4.0)
     spacing_jitter: tuple[float, float] = (-0.12, 0.20)    # fraction of glyph advance width
     size_jitter: tuple[float, float] = (0.92, 1.08)        # per-glyph scale
@@ -148,8 +149,8 @@ class OutputConfig:
     """The line is delivered as a TIGHT crop on its paper substrate — no white
     letterbox/padding around it. The shorter side is scaled to ``min_side`` and the
     aspect ratio is preserved, so wide lines stay wide and the text fills the frame."""
-    min_side: int = 224              # target shorter side in px (line is up/down-scaled to it)
-    max_side: int | None = 2400      # safety cap on the longer side (None = uncapped)
+    min_side: int = 224              # target shorter side in px (ALWAYS scaled to this)
+    max_side: int | None = None      # optional longer-side cap; if set, short side may drop below min_side
     margin_frac: tuple[float, float] = (0.06, 0.22)  # paper around the ink, fraction of line height
     min_height_px: int = 24          # reject degenerate renders below this (before the final resize) height
 

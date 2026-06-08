@@ -52,10 +52,18 @@ def randint(rng: np.random.Generator, pair: Sequence[int]) -> int:
 
 def eased_uniform(rng: np.random.Generator, pair: Sequence[float], t: float) -> float:
     """Uniform sample whose *upper* bound grows with the curriculum: at t=0 it
-    sits near ``pair[0]`` (easy), at t=1 it spans the full ``(lo, hi)`` range."""
+    sits near ``pair[0]`` (easy), at t=1 it spans the full ``(lo, hi)`` range.
+    Use this for one-sided ranges that start at a neutral lo (e.g. ``(0, max)``)."""
     lo, hi = pair
     hi_t = lerp(lo, hi, t)
     return float(rng.uniform(lo, hi_t))
+
+
+def eased_centered(rng: np.random.Generator, pair: Sequence[float], t: float) -> float:
+    """Uniform sample whose range shrinks toward 0 as t→0 — for quantities centred on
+    zero (slant, rotation, spacing jitter): t=0 → 0, t=1 → ``uniform(lo, hi)``."""
+    lo, hi = pair
+    return float(rng.uniform(lo * t, hi * t)) if t > 0 else 0.0
 
 
 def choice(rng: np.random.Generator, seq, weights=None):

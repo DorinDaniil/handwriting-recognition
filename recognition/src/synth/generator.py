@@ -72,24 +72,28 @@ class HandwrittenLineGenerator:
 
     @classmethod
     def from_dirs(cls, text_dirs, font_dirs=("assets/fonts",), *,
-                  len_chars=(8, 50), p_hyphenate=0.15, glob="*.txt", **cfg_kwargs):
+                  len_chars=(8, 50), p_hyphenate=0.15, glob="*.txt",
+                  p_real=0.75, p_words=0.10, p_random=0.15, **cfg_kwargs):
         """One-liner: build straight from folder(s) of .txt and folder(s) of fonts.
 
             gen = HandwrittenLineGenerator.from_dirs(
-                text_dirs=["/data/books", "/data/notes"],   # str or list of folders
-                font_dirs="assets/fonts",
-                len_chars=(15, 45),    # line length in characters (varies the image size)
-                p_hyphenate=0.3,       # fraction of lines ending mid-word with '-' (перенос)
+                text_dirs=["/data/books"], font_dirs="assets/fonts",
+                len_chars=(15, 45), p_hyphenate=0.3,
+                p_words=0.0, p_random=0.0,   # только ваш текст, без салата/случайных глифов
             )
 
-        ``len_chars`` / ``p_hyphenate`` / ``glob`` configure the corpus; any other
-        keyword goes to ``SynthConfig`` (e.g. ``curriculum=False``, ``warmup_steps=8000``).
-        For full control build ``SynthConfig`` yourself and pass it to the constructor."""
+        Text mode mix: ``p_real`` = running text from your .txt, ``p_words`` = word
+        salad (built-in dictionary), ``p_random`` = random glyphs/digits (robustness).
+        Set ``p_words=p_random=0`` for 100% of lines from your corpus. ``len_chars`` /
+        ``p_hyphenate`` / ``glob`` configure the corpus; other keywords go to
+        ``SynthConfig`` (e.g. ``curriculum=False``)."""
         def _as_tuple(x):
             return (str(x),) if isinstance(x, (str, Path)) else tuple(str(p) for p in x)
         cfg = SynthConfig(
             corpus=CorpusConfig(text_dirs=_as_tuple(text_dirs), len_chars=tuple(len_chars),
-                                p_hyphenate=float(p_hyphenate), glob=glob),
+                                p_hyphenate=float(p_hyphenate), glob=glob,
+                                p_real=float(p_real), p_words=float(p_words),
+                                p_random=float(p_random)),
             font=FontConfig(font_dirs=_as_tuple(font_dirs)),
             **cfg_kwargs)
         return cls(cfg)
