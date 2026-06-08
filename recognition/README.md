@@ -14,7 +14,7 @@ python scripts/fetch_fonts.py        # кириллические рукопис
 ```
 python scripts/demo_synth.py         # превью assets/synth_preview.png + замер скорости
 ```
-Ноутбуки: `notebooks/synth_usage.ipynb` (как пользоваться), `notebooks/test_synth.ipynb` (свип сложности).
+Ноутбуки: `notebooks/synth_usage.ipynb`, `notebooks/test_synth.ipynb`.
 
 ## Использование
 ```python
