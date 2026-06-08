@@ -210,3 +210,10 @@ __marimo__/
 data/
 outputs/
 labels/
+
+# recognition: fetched fonts + generated paper (regenerated via scripts/fetch_fonts.py)
+recognition/assets/fonts/*.ttf
+recognition/assets/fonts/*.otf
+recognition/assets/fonts/*.ttc
+recognition/assets/fonts/_coverage.json
+recognition/assets/paper/
