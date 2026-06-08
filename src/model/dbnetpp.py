@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .backbone import ResNet18Backbone
+from .backbone import build_backbone
 from .head import DBHead
 from .neck import ASF, FPN
 
@@ -52,14 +52,7 @@ class DBNetPP(nn.Module):
 
 def build_model(cfg: Any) -> DBNetPP:
     """Build DBNetPP from config (OmegaConf node with the schema of config.yaml)."""
-    bb_cfg = cfg.model.backbone
-    if bb_cfg.name != "resnet18":
-        raise NotImplementedError(f"Backbone {bb_cfg.name} not implemented yet")
-    backbone = ResNet18Backbone(
-        pretrained=bool(bb_cfg.pretrained),
-        use_dcn=bool(bb_cfg.use_dcn),
-        dcn_stages=tuple(bb_cfg.dcn_stages),
-    )
+    backbone = build_backbone(cfg.model.backbone)
     return DBNetPP(
         backbone=backbone,
         neck_in_channels=backbone.out_channels,

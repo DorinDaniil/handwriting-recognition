@@ -2,7 +2,7 @@
 #   python train.py trainer.epochs=200 data.batch_size=4 model.backbone.pretrained=false
 
 experiment:
-  name: dbnetpp_r18_hwr
+  name: dbnetpp_r18_hwr_clear
   output_dir: outputs
   seed: 42
 
@@ -10,8 +10,8 @@ data:
   dataset_root: /mnt/DATA2/seilov/hw_dataset/hw_dataset
   labels_txt: labels/labels.txt
   splits_dir: splits
-  train_split: splits/train.txt
-  val_split: splits/val.txt
+  train_split: splits/train_clean.txt
+  val_split: splits/val_clean.txt
   val_fraction: 0.1
   min_score: 0.5              # drop pseudo-boxes below this
   image_size: 640             # square input
@@ -39,9 +39,14 @@ target:
 model:
   name: dbnetpp
   backbone:
+    # one of: resnet18 | resnet34 | resnet50 | convnext_tiny
+    #   resnet18      : fast, 12M params, DCNv2 supported
+    #   resnet34      : sweet spot, 21M params, BasicBlock like R18, DCNv2 supported
+    #   resnet50      : stronger, 25M params, Bottleneck, DCNv2 supported
+    #   convnext_tiny : modern SOTA CNN, 28M params, ignores use_dcn
     name: resnet18
     pretrained: true
-    use_dcn: true             # DCNv2 in stages 3-5
+    use_dcn: true             # DCNv2 in stages 3-5 (resnet only)
     dcn_stages: [false, false, true, true, true]   # stage 1..5
   neck:
     inner_channels: 256
@@ -74,7 +79,7 @@ trainer:
   grad_clip: 5.0
   ema: true
   ema_decay: 0.9995
-  log_every: 50
+  log_every: 100
   eval_every: 1               # epochs
   save_every: 5               # epochs (keeps last + best)
   resume: null                # path to checkpoint or null

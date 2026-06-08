@@ -77,10 +77,7 @@ def denormalize(image_chw: torch.Tensor,
                 mean: tuple[float, float, float] = IMAGENET_MEAN,
                 std: tuple[float, float, float] = IMAGENET_STD) -> np.ndarray:
     """Reverse Normalize, return (H, W, 3) uint8 RGB."""
-    if isinstance(image_chw, torch.Tensor):
-        img = image_chw.detach().cpu().numpy()
-    else:
-        img = np.asarray(image_chw, dtype=np.float32)
+    img = image_chw.detach().cpu().numpy()
     img = np.transpose(img, (1, 2, 0))
     img = img * np.array(std, dtype=np.float32) + np.array(mean, dtype=np.float32)
     img = np.clip(img * 255.0, 0, 255).astype(np.uint8)

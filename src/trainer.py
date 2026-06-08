@@ -11,6 +11,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from .loss import DBLoss
 from .postprocess import PostprocessConfig, decode_prob_map
@@ -156,14 +157,14 @@ class Trainer:
         model.eval()
         pred_polys: list[list] = []
         gt_polys: list[list] = []
-        for batch in self.val_loader:
+        for batch in tqdm(self.val_loader, desc="val", leave=False):
             images = batch["image"].to(self.device, non_blocking=True)
             with torch.amp.autocast("cuda", dtype=self.amp_dtype, enabled=self.use_amp):
                 out = model(images)
             prob = out["prob"].float().squeeze(1).cpu().numpy()
-            H, W = images.shape[-2:]
             for i in range(images.shape[0]):
-                preds, _ = decode_prob_map(prob[i], (H, W), self.post_cfg)
+                # compare in the network's own coordinate frame
+                preds, _ = decode_prob_map(prob[i], self.post_cfg)
                 pred_polys.append(preds)
                 gts = batch["polys"][i]  # list of np.ndarray already in net-resolution
                 gt_polys.append([g for g in gts])

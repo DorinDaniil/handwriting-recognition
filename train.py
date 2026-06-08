@@ -7,6 +7,18 @@
 On first run, if split files don't exist, they are generated deterministically
 from `data.labels_txt` using `data.val_fraction` and `experiment.seed`.
 """
+
+"""
+python train.py \
+    experiment.name=dbnetpp_convnext_hwr \
+    model.backbone.name=convnext_tiny \
+    model.backbone.use_dcn=false \
+    trainer.lr=2e-4 \
+    trainer.weight_decay=0.05 \
+    trainer.warmup_epochs=5 \
+    data.batch_size=16
+"""
+
 from __future__ import annotations
 
 import logging
