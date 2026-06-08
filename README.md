@@ -1,49 +1,24 @@
-# Handwriting Recognition — двухэтапный пайплайн HTR (русский)
+# handwriting-recognition
 
-Монорепозиторий из двух самостоятельных проектов, образующих пайплайн распознавания
-рукописного текста:
+Пайплайн HTR из двух независимых проектов: детекция строк, затем распознавание текста.
 
+## detection/
+DBNet++, детекция строк на странице. См. `detection/README.md`.
 ```
-страница рукописи
-   │
-   ▼  ┌─────────────────────────────┐
-      │  detection/  (DBNet++)       │   находит строки текста (bounding-боксы)
-      └─────────────────────────────┘
-   │  кроп каждой строки
-   ▼  ┌─────────────────────────────┐
-      │  recognition/ (TrOCR ru)     │   распознаёт текст в строке
-      └─────────────────────────────┘
-   ▼
-   распознанный текст
-```
-
-## [`detection/`](detection) — детекция строк (DBNet++)
-
-Готовый проект: реимплементация [DBNet++](https://arxiv.org/abs/2202.10304) для построчной
-детекции на рукописных страницах (backbone ResNet/ConvNeXt + DCNv2, FPN+ASF, DB-head,
-AMP/EMA/cosine). Подробности и запуск — в [detection/README.md](detection/README.md).
-
-```bash
 cd detection
 pip install -r requirements.txt
-python train.py            # config.yaml
+python train.py
 ```
 
-## [`recognition/`](recognition) — распознавание (TrOCR, русский)
-
-Новый проект: дообучение TrOCR под русский рукописный почерк. Ядро — генератор
-**синтетических рукописных строк на лету** (`src/synth`): шрифты + фоны тетрадей
-(линейка/клетка) + аугментации, чтобы учиться без ручной построчной разметки.
-Подробности, архитектура и дорожная карта — в [recognition/README.md](recognition/README.md).
-
-```bash
+## recognition/
+Дообучение TrOCR под русский рукописный. Ядро — генератор синтетических строк
+(`src/synth`). См. `recognition/README.md`.
+```
 cd recognition
 pip install -r requirements.txt
 python scripts/fetch_fonts.py
 python scripts/demo_synth.py
 ```
 
----
-
-Проекты независимы (свои `requirements.txt`, свои `src/`); запускаются каждый из своей папки.
-Общий источник данных — HWR200. `data/`, `outputs/`, `labels/`, скачанные шрифты — в `.gitignore`.
+Каждый проект запускается из своей папки (свои `requirements.txt`, `src/`).
+`data/`, `outputs/`, `labels/` и шрифты в `.gitignore`.

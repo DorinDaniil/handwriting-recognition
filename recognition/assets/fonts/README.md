@@ -1,18 +1,12 @@
-# Шрифты для синтетики
+# fonts
 
-Сюда складываются кириллические **рукописные** шрифты (`.ttf`/`.otf`/`.ttc`).
-Сами файлы шрифтов в git не коммитятся (см. `.gitignore`).
+Рукописные кириллические шрифты (`.ttf`/`.otf`). Сами файлы не коммитятся (`.gitignore`).
 
-Наполнить автоматически:
-
-```bash
+Наполнить:
+```
 python scripts/fetch_fonts.py
 ```
+Вручную: handwriting+cyrillic с fontesk.com / localfonts.eu / fontspace.com — положить сюда.
 
-Или вручную — скачать бесплатные шрифты со стилем *handwriting + cyrillic*:
-[fontesk.com](https://fontesk.com/tag/cyrillic/), [localfonts.eu](https://localfonts.eu/freefonts/handwritten-cyrillic-free-fonts/),
-[fontspace.com](https://www.fontspace.com/category/handwriting,cyrillic) — и положить `.ttf` сюда.
-
-`FontBank` сам проверит покрытие глифов (через fontTools), отбросит латиница-only/только-заглавные
-шрифты и закэширует результат в `_coverage.json`. Хотите больше разнообразия — просто добавьте
-файлы и перезапустите.
+`FontBank` проверяет покрытие глифов (fontTools), отбрасывает шрифты ниже
+`min_glyph_coverage`, кэширует результат в `_coverage.json`.

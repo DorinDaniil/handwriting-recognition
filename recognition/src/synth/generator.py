@@ -10,12 +10,13 @@ future GAN/diffusion ink source (Tier 2) can drop in behind the same contract.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
 from .backgrounds import PaperBackground
-from .config import SynthConfig
+from .config import CorpusConfig, FontConfig, SynthConfig
 from .corpus import TextSampler
 from .effects import Compositor, EffectsPipeline
 from .fonts import FontBank
@@ -52,6 +53,23 @@ class HandwrittenLineGenerator:
         self.paper = paper or PaperBackground(self.cfg.paper)
         self.compositor = compositor or Compositor(self.cfg.effects)
         self.effects = effects or EffectsPipeline(self.cfg.effects)
+
+    @classmethod
+    def from_dirs(cls, text_dirs, font_dirs=("assets/fonts",), **cfg_kwargs):
+        """One-liner: build straight from folder(s) of .txt and folder(s) of fonts.
+
+            gen = HandwrittenLineGenerator.from_dirs(
+                text_dirs=["/data/books", "/data/notes"],   # str or list of folders
+                font_dirs="assets/fonts",
+            )
+
+        Extra keyword args go to ``SynthConfig`` (e.g. ``warmup_steps=8000``,
+        ``curriculum=False``). Tune corpus/output via the returned ``gen.cfg``."""
+        def _as_tuple(x):
+            return (str(x),) if isinstance(x, (str, Path)) else tuple(str(p) for p in x)
+        cfg = SynthConfig(corpus=CorpusConfig(text_dirs=_as_tuple(text_dirs)),
+                          font=FontConfig(font_dirs=_as_tuple(font_dirs)), **cfg_kwargs)
+        return cls(cfg)
 
     # ----------------------------------------------------------- curriculum
 

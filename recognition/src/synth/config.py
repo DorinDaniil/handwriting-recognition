@@ -30,18 +30,27 @@ RGB = tuple[int, int, int]
 
 @dataclass
 class CorpusConfig:
-    """Where target strings come from and how long they are."""
-    real_text_files: tuple[str, ...] = ()   # .txt dumps: HWR200 full_text, wiki, books
-    word_lists: tuple[str, ...] = ()         # frequency word lists for the word-salad mode
-    # mode mix (renormalized internally) — coherent real text matches the eval domain,
-    # word-salad widens vocabulary, random glyphs harden rare chars/digits/punct
-    p_real: float = 0.55
-    p_words: float = 0.30
+    """Where target strings come from and how long they are.
+
+    The main mode is **real**: point ``text_dirs`` at one or more folders of .txt
+    files and the sampler walks them at random, reads a file, and cuts a
+    running-text *line* of varying length (optionally hyphenated at the break —
+    перенос). No need to pre-concatenate, split into words, or clean anything.
+    """
+    text_dirs: tuple[str, ...] = ()          # folders of .txt — walked recursively, picked at random
+    real_text_files: tuple[str, ...] = ()    # explicit .txt files added to the same pool
+    word_lists: tuple[str, ...] = ()         # optional frequency word lists (word-salad mode)
+    glob: str = "*.txt"                      # which files to collect under text_dirs
+    # mode mix (renormalized internally) — real running text dominates; word-salad
+    # widens vocabulary, random glyphs harden rare chars/digits/punctuation
+    p_real: float = 0.75
+    p_words: float = 0.10
     p_random: float = 0.15
-    len_chars: tuple[int, int] = (8, 48)     # target line length, in characters
+    len_chars: tuple[int, int] = (8, 50)     # target line length in characters (varies the image size)
+    p_hyphenate: float = 0.15                # end a line mid-word with '-' (перенос), like real wrapping
+    flatten_newlines: bool = True            # treat the source as running text (newlines -> spaces)
     p_digits_in_random: float = 0.35
     p_punct_in_random: float = 0.25
-    allow_latin_mix: float = 0.05            # rare ru/en mixing seen in real notes
     lowercase_prob: float = 0.0              # TrOCR-handwritten is cased; keep 0 normally
 
 
