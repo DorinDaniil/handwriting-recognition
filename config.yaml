@@ -51,7 +51,7 @@ target:
 model:
   name: dbnetpp
   backbone:
-    name: resnet18
+    name: resnet34
     pretrained: true
     use_dcn: true             # DCNv2 in stages 3-5
     dcn_stages: [false, false, true, true, true]   # stage 1..5
