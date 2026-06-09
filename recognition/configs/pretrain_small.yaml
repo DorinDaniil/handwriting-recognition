@@ -5,7 +5,7 @@
 model:
   pretrained: microsoft/trocr-small-handwritten
   tokenizer: assets/tokenizer_bi    # English + RU tokens (scripts/train_tokenizer.py); if missing -> english only
-  max_target_len: 64
+  max_target_len: 128       # длина меток/генерации в токенах; под len_chars до ~100 символов
 
 data:
   ru_text_dirs: [/mnt/DATA2/dorin/handwriting-recognition/data/ru_texts]
@@ -15,9 +15,9 @@ data:
   ru_font_dirs: [assets/fonts_ru]
   en_font_dirs: [assets/fonts_en]
   p_ru: 0.5                  # share of Russian lines (rest English)
-  batch_size: 16
-  num_workers: 8
-  val_samples: 500           # fixed synthetic val (mix EN+RU); replace with real lines later
+  batch_size: 16             # pixel_values на батч ~ batch*3*384*384*4 байт (~113МБ при 16); снижай при нехватке RAM
+  num_workers: 4             # очередь префетча ~ num_workers*2 батчей в RAM; меньше воркеров = меньше памяти
+  val_samples: 500           # синтетический val (ленивый, в RAM не копится); потом замени на реальные строки
   len_chars: [8, 50]
   p_hyphenate: 0.15
 

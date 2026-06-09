@@ -1,8 +1,8 @@
 """Bilingual text sampling from folders of .txt: running-text lines + handwriting-error aug.
 
-Per language the folders are kept separate so they can be weighted (``*_text_weights``):
-a folder is picked by weight, then a random file inside it. No weights -> weight by file
-count (i.e. uniform over all files).
+Folders are weighted per language (``*_text_weights``): a folder is picked by weight,
+then a random file inside it. File paths are stored as one bytes blob + numpy offsets
+(not millions of Python str objects) — small RAM and copy-on-write-safe across workers.
 """
 from __future__ import annotations
 
@@ -14,13 +14,14 @@ import tempfile
 from functools import lru_cache
 from pathlib import Path
 
+import numpy as np
+
 from .config import CorpusConfig
 from .rng import chance, choice, lerp, randint
 
 logger = logging.getLogger(__name__)
 _WS = re.compile(r"\s+")
 
-# fallback vocab when no corpus is configured (not a normal mode, just a safety net)
 _BUILTIN_RU = ("и в не на что быть он как это она по но они мы из который то за свой весь год от "
                "так для если время школа учитель ученик урок задача ответ вопрос пример текст "
                "тетрадь сегодня погода хорошо большой новый первый природа друзья").split()
@@ -28,10 +29,28 @@ _BUILTIN_EN = ("the of and to in a is that it was for on are as with they at be 
                "school teacher student lesson question answer number letter english text page line "
                "today weather good first nature friends house city book").split()
 
-# look/sound-alike confusions (school-kid spelling mistakes)
 _RU_CONF = {"о": "а", "а": "о", "е": "и", "и": "е", "я": "е", "э": "е", "ё": "е",
             "с": "з", "з": "с", "т": "д", "д": "т", "б": "п", "п": "б", "ж": "ш", "ш": "ж"}
 _EN_CONF = {"a": "e", "e": "a", "i": "e", "o": "a", "u": "a", "s": "z", "c": "s", "k": "c"}
+
+
+class _FileList:
+    """Compact, COW-safe list of file paths: one bytes blob + line offsets."""
+    __slots__ = ("_blob", "_s", "_e")
+
+    def __init__(self, blob: bytes):
+        arr = np.frombuffer(blob, dtype=np.uint8)
+        seps = np.where(arr == 0x0A)[0]                 # '\n' positions
+        self._blob = blob
+        self._s = np.concatenate(([0], seps + 1)).astype(np.int64)
+        self._e = np.concatenate((seps, [len(blob)])).astype(np.int64)
+
+    def __len__(self):
+        return len(self._s)
+
+    def pick(self, rng) -> str:
+        k = int(rng.integers(0, len(self._s)))
+        return self._blob[self._s[k]:self._e[k]].decode("utf-8", "ignore")
 
 
 @lru_cache(maxsize=64)
@@ -62,21 +81,28 @@ def _walk(root: str, exts: tuple) -> list[str]:
     return out
 
 
-def _discover_dir(d, glob: str, cache_dir=None) -> list[str]:
-    """Files under one dir; cached to a per-dir manifest so it is walked only once."""
+def _discover_dir(d, glob: str, cache_dir=None):
+    """Return a _FileList for one dir; cached to a per-dir manifest (walked once)."""
     if not Path(d).exists():
         logger.warning("corpus: missing dir %s", d)
-        return []
+        return None
     key = hashlib.md5((str(Path(d).resolve()) + glob).encode()).hexdigest()[:16]
     cache = Path(cache_dir or Path(tempfile.gettempdir()) / "synth_corpus")
     cache.mkdir(parents=True, exist_ok=True)
     manifest = cache / f"{key}.txt"
     if manifest.exists():
-        return manifest.read_text(encoding="utf-8").splitlines()
-    files = _walk(str(d), (glob.lstrip("*").lower(),))
-    manifest.write_text("\n".join(files), encoding="utf-8")
-    logger.info("corpus: walked %d files in %s", len(files), d)
-    return files
+        blob = manifest.read_bytes()
+    else:
+        blob = "\n".join(_walk(str(d), (glob.lstrip("*").lower(),))).encode("utf-8")
+        try:
+            manifest.write_bytes(blob)
+        except Exception as e:
+            logger.warning("corpus: manifest not written (%s): %s", manifest, e)
+    if not blob:
+        return None
+    fl = _FileList(blob)
+    logger.info("corpus: %d files in %s", len(fl), d)
+    return fl
 
 
 class TextSampler:
@@ -98,14 +124,14 @@ class TextSampler:
             logger.warning("corpus: %d weights != %d dirs -> ignoring weights", len(weights), len(dirs))
         groups, ws = [], []
         for i, d in enumerate(dirs):
-            files = _discover_dir(d, cfg.glob, cfg.cache_dir)
-            if files:
-                groups.append(files)
-                ws.append(float(weights[i]) if use_w else float(len(files)))
+            fl = _discover_dir(d, cfg.glob, cfg.cache_dir)
+            if fl and len(fl):
+                groups.append(fl)
+                ws.append(float(weights[i]) if use_w else float(len(fl)))
         return groups, ws
 
     def n_files(self, lang: str) -> int:
-        return sum(len(g) for g in self._groups[lang])
+        return sum(len(fl) for fl in self._groups[lang])
 
     def sample(self, rng, t: float = 1.0):
         lang = "ru" if chance(rng, self.cfg.p_ru) else "en"
@@ -124,8 +150,8 @@ class TextSampler:
         return randint(rng, (lo, max(lo, int(lerp(lo, hi, t)))))
 
     def _real_line(self, rng, n, lang):
-        g = choice(rng, self._groups[lang], self._dir_w[lang])   # pick folder by weight
-        raw = _read_flat(g[int(rng.integers(0, len(g)))])         # random file inside it
+        fl = choice(rng, self._groups[lang], self._dir_w[lang])   # pick folder by weight
+        raw = _read_flat(fl.pick(rng))                            # random file inside it
         if len(raw) <= 2:
             return ""
         if len(raw) <= n:

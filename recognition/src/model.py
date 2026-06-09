@@ -34,7 +34,7 @@ def _special_ids(tokenizer):
     return bos, eos, pad
 
 
-def build_trocr_small(tokenizer, pretrained: str = DEFAULT_PRETRAINED, max_length: int = 64):
+def build_trocr_small(tokenizer, pretrained: str = DEFAULT_PRETRAINED, max_length: int = 128):
     from transformers import VisionEncoderDecoderModel
 
     model = VisionEncoderDecoderModel.from_pretrained(pretrained)

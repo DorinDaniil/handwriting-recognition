@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import tempfile
 from functools import lru_cache
 from pathlib import Path
 
@@ -79,8 +80,10 @@ def load_or_build_coverage(font_dirs, charset: str, refresh: bool = False) -> di
     files = scan_font_files(font_dirs)
     chash = hashlib.md5(charset.encode("utf-8")).hexdigest()[:12]
     active = set(charset)
-    manifest_dir = next((Path(d) for d in font_dirs if Path(d).exists()), Path(font_dirs[0]))
-    manifest_path = manifest_dir / _MANIFEST_NAME
+    cache = Path(tempfile.gettempdir()) / "synth_fonts"   # writable; fonts dir may be read-only
+    cache.mkdir(parents=True, exist_ok=True)
+    dkey = hashlib.md5("|".join(sorted(map(str, font_dirs))).encode()).hexdigest()[:16]
+    manifest_path = cache / f"{dkey}.json"
 
     cache = {}
     if manifest_path.exists() and not refresh:

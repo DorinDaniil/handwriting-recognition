@@ -28,21 +28,22 @@ class SynthLineDataset(IterableDataset):
 
 
 class FixedSynthValDataset(Dataset):
-    """N deterministic samples at full difficulty — a stable proxy val set."""
+    """Deterministic synthetic val set, generated lazily (same image per index each
+    eval, nothing held in RAM)."""
     def __init__(self, gen: HandwrittenLineGenerator, n: int = 500, seed: int = 123):
-        step = gen.cfg.warmup_steps
-        self.items = [gen.sample(make_generator(seed, 0, i), step=step) for i in range(n)]
+        self.gen, self.n, self.seed = gen, n, seed
+        self.step = gen.cfg.warmup_steps
 
     def __len__(self):
-        return len(self.items)
+        return self.n
 
     def __getitem__(self, i):
-        img, text = self.items[i]
+        img, text = self.gen.sample(make_generator(self.seed, 0, i), step=self.step)
         return {"image": img, "text": text}
 
 
 class TrOCRCollator:
-    def __init__(self, processor, max_len: int = 64):
+    def __init__(self, processor, max_len: int = 128):
         self.p, self.max_len = processor, max_len
 
     def __call__(self, batch):
