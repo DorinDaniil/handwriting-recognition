@@ -1,0 +1,38 @@
+# Pretrain TrOCR-small (Russian) on synthetic lines.
+#   python scripts/run_pretrain.py --config configs/pretrain_small.yaml
+#   python scripts/run_pretrain.py --resume
+
+model:
+  pretrained: microsoft/trocr-small-handwritten
+  tokenizer: assets/tokenizer_ru        # train via scripts/train_tokenizer.py; if missing -> english tokenizer
+  max_target_len: 64
+
+data:
+  text_dirs: [/mnt/DATA2/dorin/handwriting-recognition/data/texts]
+  font_dirs: [assets/fonts]
+  batch_size: 16
+  num_workers: 8
+  val_samples: 500          # fixed synthetic val set (replace with real lines later)
+  len_chars: [8, 50]
+  p_hyphenate: 0.15
+  p_words: 0.10
+  p_random: 0.10
+
+synth:
+  warmup_steps: 8000        # curriculum ramp (difficulty 0 -> 1)
+  seed: 42
+
+trainer:
+  max_steps: 60000
+  lr: 5.0e-5
+  weight_decay: 0.01
+  warmup_steps: 2000        # LR warmup
+  freeze_encoder_steps: 2000   # phase 1: warm up the fresh decoder head/embeddings
+  amp_dtype: bf16           # bf16 | fp16 | fp32
+  grad_clip: 1.0
+  num_beams: 1              # greedy during eval (fast); raise for final eval
+  log_every: 50
+  eval_every: 2000
+  output_dir: outputs/trocr_small_ru_pretrain
+
+device: cuda
