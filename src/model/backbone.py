@@ -108,3 +108,38 @@ class ResNet18Backbone(nn.Module):
         c4 = self.layer3(c3)
         c5 = self.layer4(c4)
         return c2, c3, c4, c5
+
+
+class ResNet34Backbone(nn.Module):
+    """Torchvision ResNet-18 feature extractor returning C2..C5."""
+
+    out_channels = (64, 128, 256, 512)
+
+    def __init__(self, pretrained: bool = True, use_dcn: bool = True,
+                 dcn_stages: Sequence[bool] = (False, False, True, True, True)):
+        super().__init__()
+        weights = torchvision.models.ResNet34_Weights.DEFAULT if pretrained else None
+        net = torchvision.models.resnet34(weights=weights)
+
+        self.stem = nn.Sequential(net.conv1, net.bn1, net.relu, net.maxpool)
+        self.layer1 = net.layer1  # stride 4,  64 ch   (stage 2)
+        self.layer2 = net.layer2  # stride 8, 128 ch   (stage 3)
+        self.layer3 = net.layer3  # stride 16, 256 ch  (stage 4)
+        self.layer4 = net.layer4  # stride 32, 512 ch  (stage 5)
+
+        if use_dcn:
+            # dcn_stages indexes stages 1..5; stage 1 is stem (skip)
+            if dcn_stages[2]:
+                self.layer2 = _replace_basicblock_with_dcn(self.layer2)
+            if dcn_stages[3]:
+                self.layer3 = _replace_basicblock_with_dcn(self.layer3)
+            if dcn_stages[4]:
+                self.layer4 = _replace_basicblock_with_dcn(self.layer4)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        x = self.stem(x)
+        c2 = self.layer1(x)
+        c3 = self.layer2(c2)
+        c4 = self.layer3(c3)
+        c5 = self.layer4(c4)
+        return c2, c3, c4, c5
