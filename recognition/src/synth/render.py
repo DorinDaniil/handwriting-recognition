@@ -26,9 +26,13 @@ class LineRenderer:
         pad = cfg.pad_px + 4
         wob_max = cfg.baseline_wobble_px[1]
 
+        space_min = cfg.space_min_frac * glyph_h
         advances, jit = [], []
         for ch in text:
-            advances.append(float(font.getlength(ch)))
+            a = float(font.getlength(ch))
+            if ch == " ":
+                a = max(a, space_min)          # guarantee a word gap (fonts vary)
+            advances.append(a)
             jit.append(1.0 + eased_centered(rng, cfg.spacing_jitter, t))
         total_w = int(sum(a * j for a, j in zip(advances, jit))) + 2 * pad + glyph_h
         canvas_h = int(glyph_h * 1.6 + 2 * pad + wob_max)

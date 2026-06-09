@@ -22,18 +22,19 @@ RGB = tuple[int, int, int]
 class CorpusConfig:
     ru_text_dirs: tuple[str, ...] = ()
     en_text_dirs: tuple[str, ...] = ()
+    ru_text_weights: tuple[float, ...] = ()  # per-folder sampling weights (len == dirs); empty -> by file count
+    en_text_weights: tuple[float, ...] = ()
     glob: str = "*.txt"
     cache_dir: str | None = None             # file-list manifest cache (delete to rescan)
     p_ru: float = 0.5                        # share of Russian lines
-    p_real: float = 0.75                     # mode mix: real text / word salad / random glyphs
-    p_words: float = 0.10
-    p_random: float = 0.15
     len_chars: tuple[int, int] = (8, 50)
     p_hyphenate: float = 0.15                # end a line mid-word with '-'
-    flatten_newlines: bool = True
-    p_digits_in_random: float = 0.35
-    p_punct_in_random: float = 0.25
     lowercase_prob: float = 0.0
+    # text-error block (imitates handwriting mistakes; the error goes into the label too)
+    p_text_error: float = 0.25               # chance a line gets any errors
+    p_letter_sub: float = 0.06               # per-letter chance to swap a look/sound-alike (о->а, e->a)
+    p_drop_punct: float = 0.35               # chance to drop one punctuation mark
+    p_typo: float = 0.12                     # chance to double or drop one letter
 
 
 @dataclass
@@ -50,17 +51,18 @@ class RenderConfig:
     ink_colors: tuple[RGB, ...] = (
         (20, 20, 28), (28, 40, 120), (40, 60, 160), (70, 70, 75),
     )
-    p_pencil: float = 0.25
-    baseline_wobble_px: tuple[float, float] = (0.0, 2.5)
-    slant_deg: tuple[float, float] = (-8.0, 12.0)          # italic shear
-    line_rotate_deg: tuple[float, float] = (-3.0, 3.0)     # whole-line tilt
-    per_glyph_rot_deg: tuple[float, float] = (-4.0, 4.0)
-    spacing_jitter: tuple[float, float] = (-0.12, 0.20)
-    size_jitter: tuple[float, float] = (0.92, 1.08)
-    ink_alpha: tuple[float, float] = (0.80, 1.0)
-    pencil_alpha: tuple[float, float] = (0.45, 0.78)
-    stroke_grain: float = 0.20
+    p_pencil: float = 0.20
+    baseline_wobble_px: tuple[float, float] = (0.0, 2.0)
+    slant_deg: tuple[float, float] = (-6.0, 9.0)           # italic shear
+    line_rotate_deg: tuple[float, float] = (-2.5, 2.5)     # whole-line tilt
+    per_glyph_rot_deg: tuple[float, float] = (-3.0, 3.0)
+    spacing_jitter: tuple[float, float] = (-0.05, 0.16)    # less negative -> words don't glue
+    size_jitter: tuple[float, float] = (0.95, 1.06)
+    ink_alpha: tuple[float, float] = (0.82, 1.0)
+    pencil_alpha: tuple[float, float] = (0.55, 0.82)
+    stroke_grain: float = 0.14
     pad_px: int = 6
+    space_min_frac: float = 0.33             # min word gap as fraction of glyph height
 
 
 @dataclass
@@ -79,40 +81,40 @@ class PaperConfig:
     p_margin_line: float = 0.35
     margin_color: RGB = (200, 70, 70)
     fiber_noise: float = 0.015
-    vignette: tuple[float, float] = (0.0, 0.12)
+    vignette: tuple[float, float] = (0.0, 0.10)
     real_paper_dir: str | None = None
     use_cache_pool: bool = False
 
 
 @dataclass
 class EffectsConfig:
-    p_show_through: float = 0.10
-    ink_bleed_px: tuple[float, float] = (0.0, 0.8)
-    p_elastic: float = 0.30
-    elastic_alpha: tuple[float, float] = (10.0, 40.0)
-    elastic_sigma: tuple[float, float] = (4.0, 7.0)
-    p_grid_distort: float = 0.20
-    p_perspective: float = 0.25
-    perspective_scale: tuple[float, float] = (0.02, 0.06)
-    p_baseline_curve: float = 0.15
-    p_blur: float = 0.30
-    p_motion_blur: float = 0.10
-    p_gauss_noise: float = 0.30
-    p_iso_noise: float = 0.15
-    p_brightness_contrast: float = 0.45
-    p_gamma: float = 0.20
-    p_illumination: float = 0.25
-    p_jpeg: float = 0.35
-    jpeg_quality: tuple[int, int] = (35, 92)
-    p_downscale: float = 0.25
-    downscale_range: tuple[float, float] = (0.5, 0.85)
+    p_show_through: float = 0.06
+    ink_bleed_px: tuple[float, float] = (0.0, 0.5)
+    p_elastic: float = 0.18
+    elastic_alpha: tuple[float, float] = (8.0, 20.0)
+    elastic_sigma: tuple[float, float] = (4.0, 6.0)
+    p_grid_distort: float = 0.12
+    p_perspective: float = 0.15
+    perspective_scale: tuple[float, float] = (0.02, 0.045)
+    p_baseline_curve: float = 0.10
+    p_blur: float = 0.22
+    p_motion_blur: float = 0.05
+    p_gauss_noise: float = 0.20
+    p_iso_noise: float = 0.08
+    p_brightness_contrast: float = 0.35
+    p_gamma: float = 0.15
+    p_illumination: float = 0.18
+    p_jpeg: float = 0.30
+    jpeg_quality: tuple[int, int] = (55, 95)
+    p_downscale: float = 0.15
+    downscale_range: tuple[float, float] = (0.65, 0.92)
 
 
 @dataclass
 class OutputConfig:
     min_side: int = 224                      # shorter side after resize; aspect kept
     max_side: int | None = None
-    margin_frac: tuple[float, float] = (0.06, 0.22)
+    margin_frac: tuple[float, float] = (0.10, 0.28)   # paper around text (room for geometry, no text crop)
     min_height_px: int = 24
 
 

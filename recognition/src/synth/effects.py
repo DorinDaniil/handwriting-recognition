@@ -77,14 +77,17 @@ class EffectsPipeline:
         except TypeError:
             geo["elastic"] = A.ElasticTransform(alpha=float(np.mean(cfg.elastic_alpha)),
                                                 sigma=float(np.mean(cfg.elastic_sigma)), p=1.0)
-        try:
-            geo["grid"] = A.GridDistortion(num_steps=5, distort_limit=0.2, border_mode=_BORDER, p=1.0)
-        except TypeError:
-            geo["grid"] = A.GridDistortion(num_steps=5, distort_limit=0.2, p=1.0)
-        geo["persp"] = None     # perspective pads black by default -> only keep it with a replicate border
+        geo["grid"] = None      # normalized=True keeps cells in-frame (no text pushed out)
+        for extra in ({"normalized": True, "border_mode": _BORDER}, {"border_mode": _BORDER}, {}):
+            try:
+                geo["grid"] = A.GridDistortion(num_steps=5, distort_limit=0.15, p=1.0, **extra)
+                break
+            except TypeError:
+                continue
+        geo["persp"] = None     # fit_output=True keeps the whole line (no crop); replicate border = paper
         for kw in ("border_mode", "pad_mode"):
             try:
-                geo["persp"] = A.Perspective(scale=cfg.perspective_scale, fit_output=False,
+                geo["persp"] = A.Perspective(scale=cfg.perspective_scale, fit_output=True,
                                              p=1.0, **{kw: _BORDER})
                 break
             except TypeError:
@@ -110,9 +113,9 @@ class EffectsPipeline:
     def _build_photo(self):
         cfg = self.cfg
         try:    # kwargs renamed across albumentations versions
-            gnoise = A.GaussNoise(std_range=(0.02, 0.12), p=1.0)
+            gnoise = A.GaussNoise(std_range=(0.02, 0.07), p=1.0)
         except TypeError:
-            gnoise = A.GaussNoise(var_limit=(10.0, 60.0), p=1.0)
+            gnoise = A.GaussNoise(var_limit=(8.0, 35.0), p=1.0)
         try:
             jpeg = A.ImageCompression(quality_range=cfg.jpeg_quality, p=1.0)
         except TypeError:
@@ -123,11 +126,11 @@ class EffectsPipeline:
         except TypeError:
             down = A.Downscale(scale_min=cfg.downscale_range[0], scale_max=cfg.downscale_range[1], p=1.0)
         return {
-            "blur": A.GaussianBlur(blur_limit=(3, 5), p=1.0),
-            "motion": A.MotionBlur(blur_limit=5, p=1.0),
+            "blur": A.GaussianBlur(blur_limit=(3, 3), p=1.0),
+            "motion": A.MotionBlur(blur_limit=3, p=1.0),
             "gnoise": gnoise, "iso": A.ISONoise(p=1.0),
-            "bc": A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=1.0),
-            "gamma": A.RandomGamma(gamma_limit=(80, 120), p=1.0), "jpeg": jpeg, "down": down,
+            "bc": A.RandomBrightnessContrast(brightness_limit=0.15, contrast_limit=0.15, p=1.0),
+            "gamma": A.RandomGamma(gamma_limit=(85, 115), p=1.0), "jpeg": jpeg, "down": down,
         }
 
     # custom numpy ops (no albumentations equivalent, used in both backends)
@@ -154,14 +157,14 @@ class EffectsPipeline:
         cfg = self.cfg
         pil = Image.fromarray(img)
         if chance(rng, scale_p(cfg.p_blur, t)):
-            pil = pil.filter(ImageFilter.GaussianBlur(float(rng.uniform(0.5, 1.4))))
+            pil = pil.filter(ImageFilter.GaussianBlur(float(rng.uniform(0.4, 1.0))))
         arr = np.asarray(pil).astype(np.float32)
         if chance(rng, scale_p(cfg.p_brightness_contrast, t)):
             arr = (arr - 128) * float(rng.uniform(0.85, 1.15)) + 128 + float(rng.uniform(-0.15, 0.15)) * 255
         if chance(rng, scale_p(cfg.p_gamma, t)):
             arr = ((np.clip(arr, 0, 255) / 255.0) ** float(rng.uniform(0.8, 1.25))) * 255.0
         if chance(rng, scale_p(cfg.p_gauss_noise, t)):
-            arr = arr + rng.normal(0, float(rng.uniform(4, 18)), size=arr.shape)
+            arr = arr + rng.normal(0, float(rng.uniform(3, 11)), size=arr.shape)
         arr = np.clip(arr, 0, 255).astype(np.uint8)
         if chance(rng, scale_p(cfg.p_downscale, t)):
             f = float(rng.uniform(*cfg.downscale_range)); h, w = arr.shape[:2]

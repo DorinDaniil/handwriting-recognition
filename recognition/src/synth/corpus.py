@@ -1,4 +1,9 @@
-"""Bilingual text sampling from folders of .txt (running-text lines, optional hyphenation)."""
+"""Bilingual text sampling from folders of .txt: running-text lines + handwriting-error aug.
+
+Per language the folders are kept separate so they can be weighted (``*_text_weights``):
+a folder is picked by weight, then a random file inside it. No weights -> weight by file
+count (i.e. uniform over all files).
+"""
 from __future__ import annotations
 
 import hashlib
@@ -15,18 +20,18 @@ from .rng import chance, choice, lerp, randint
 logger = logging.getLogger(__name__)
 _WS = re.compile(r"\s+")
 
-_BUILTIN_RU = (
-    "и в не на что быть он как это она по но они мы из который то за свой весь год от так "
-    "для если время рука когда другой наш знать стать человек жизнь день город дом слово "
-    "место школа учитель ученик урок задача ответ вопрос пример число буква русский текст "
-    "тетрадь страница строка сегодня погода хорошо большой новый первый природа друзья"
-).split()
-_BUILTIN_EN = (
-    "the of and to in a is that it was for on are as with his they at be this from or one had "
-    "by word but not what all were we when your can said there use each which she how their "
-    "school teacher student lesson question answer number letter english text page line today "
-    "weather good first nature friends house city book"
-).split()
+# fallback vocab when no corpus is configured (not a normal mode, just a safety net)
+_BUILTIN_RU = ("и в не на что быть он как это она по но они мы из который то за свой весь год от "
+               "так для если время школа учитель ученик урок задача ответ вопрос пример текст "
+               "тетрадь сегодня погода хорошо большой новый первый природа друзья").split()
+_BUILTIN_EN = ("the of and to in a is that it was for on are as with they at be this from or one "
+               "school teacher student lesson question answer number letter english text page line "
+               "today weather good first nature friends house city book").split()
+
+# look/sound-alike confusions (school-kid spelling mistakes)
+_RU_CONF = {"о": "а", "а": "о", "е": "и", "и": "е", "я": "е", "э": "е", "ё": "е",
+            "с": "з", "з": "с", "т": "д", "д": "т", "б": "п", "п": "б", "ж": "ш", "ш": "ж"}
+_EN_CONF = {"a": "e", "e": "a", "i": "e", "o": "a", "u": "a", "s": "z", "c": "s", "k": "c"}
 
 
 @lru_cache(maxsize=64)
@@ -57,27 +62,20 @@ def _walk(root: str, exts: tuple) -> list[str]:
     return out
 
 
-def _discover(dirs, glob: str, cache_dir=None) -> list[str]:
-    """List files under dirs; cached to a manifest so millions of files are walked once."""
-    if not dirs:
+def _discover_dir(d, glob: str, cache_dir=None) -> list[str]:
+    """Files under one dir; cached to a per-dir manifest so it is walked only once."""
+    if not Path(d).exists():
+        logger.warning("corpus: missing dir %s", d)
         return []
-    key = hashlib.md5(("|".join(sorted(map(str, dirs))) + glob).encode()).hexdigest()[:16]
+    key = hashlib.md5((str(Path(d).resolve()) + glob).encode()).hexdigest()[:16]
     cache = Path(cache_dir or Path(tempfile.gettempdir()) / "synth_corpus")
     cache.mkdir(parents=True, exist_ok=True)
     manifest = cache / f"{key}.txt"
     if manifest.exists():
-        files = manifest.read_text(encoding="utf-8").splitlines()
-        logger.info("corpus: %d files (cached)", len(files))
-        return files
-    exts = (glob.lstrip("*").lower(),)
-    files = []
-    for d in dirs:
-        if Path(d).exists():
-            files += _walk(str(d), exts)
-        else:
-            logger.warning("corpus: missing dir %s", d)
+        return manifest.read_text(encoding="utf-8").splitlines()
+    files = _walk(str(d), (glob.lstrip("*").lower(),))
     manifest.write_text("\n".join(files), encoding="utf-8")
-    logger.info("corpus: walked %d files (cached -> %s)", len(files), manifest)
+    logger.info("corpus: walked %d files in %s", len(files), d)
     return files
 
 
@@ -85,50 +83,49 @@ class TextSampler:
     def __init__(self, cfg: CorpusConfig, ru_charset: str, en_charset: str):
         self.cfg = cfg
         self._sets = {"ru": set(ru_charset), "en": set(en_charset)}
-        self._files = {"ru": _discover(cfg.ru_text_dirs, cfg.glob, cfg.cache_dir),
-                       "en": _discover(cfg.en_text_dirs, cfg.glob, cfg.cache_dir)}
-        self._words = {"ru": [w for w in _BUILTIN_RU if all(c in self._sets["ru"] for c in w)],
-                       "en": [w for w in _BUILTIN_EN if all(c in self._sets["en"] for c in w)]}
-        for lang, cset in (("ru", ru_charset), ("en", en_charset)):
-            cs = self._sets[lang]
-            up = [c for c in cset if c.isupper()]
-            lo = [c for c in cset if c.islower()]
-            dig = [c for c in cs if c.isdigit()]
-            pun = [c for c in cs if not c.isalnum() and not c.isspace()]
-            setattr(self, f"_{lang}_pools", (lo or up, up, dig, pun))
-        logger.info("TextSampler: ru=%d en=%d files", len(self._files["ru"]), len(self._files["en"]))
+        self._groups, self._dir_w = {}, {}
+        for lang, dirs, weights in (("ru", cfg.ru_text_dirs, cfg.ru_text_weights),
+                                    ("en", cfg.en_text_dirs, cfg.en_text_weights)):
+            self._groups[lang], self._dir_w[lang] = self._build_groups(dirs, weights, cfg)
+        self._builtin = {"ru": [w for w in _BUILTIN_RU if all(c in self._sets["ru"] for c in w)],
+                         "en": [w for w in _BUILTIN_EN if all(c in self._sets["en"] for c in w)]}
+        self._conf = {"ru": _RU_CONF, "en": _EN_CONF}
+        logger.info("TextSampler: ru=%d en=%d files", self.n_files("ru"), self.n_files("en"))
+
+    def _build_groups(self, dirs, weights, cfg):
+        use_w = bool(weights) and len(weights) == len(dirs)
+        if weights and not use_w:
+            logger.warning("corpus: %d weights != %d dirs -> ignoring weights", len(weights), len(dirs))
+        groups, ws = [], []
+        for i, d in enumerate(dirs):
+            files = _discover_dir(d, cfg.glob, cfg.cache_dir)
+            if files:
+                groups.append(files)
+                ws.append(float(weights[i]) if use_w else float(len(files)))
+        return groups, ws
+
+    def n_files(self, lang: str) -> int:
+        return sum(len(g) for g in self._groups[lang])
 
     def sample(self, rng, t: float = 1.0):
         lang = "ru" if chance(rng, self.cfg.p_ru) else "en"
         cs = self._sets[lang]
         n = self._target_len(rng, t)
-        mode = choice(rng, *self._modes(lang))
-        if mode == "real":
-            s = self._real_line(rng, n, lang)
-        elif mode == "words":
-            s = self._word_salad(rng, n, lang)
-        else:
-            s = self._random_glyphs(rng, n, lang)
-        s = _clean(s, cs) or self._word_salad(rng, n, lang)
+        s = self._real_line(rng, n, lang) if self._groups[lang] else self._builtin_line(rng, n, lang)
+        s = _clean(s, cs) or self._builtin_line(rng, n, lang)
+        s = self._apply_errors(s, lang, rng)
+        s = _clean(s, cs)
         if self.cfg.lowercase_prob and chance(rng, self.cfg.lowercase_prob):
             s = s.lower()
         return s, lang
-
-    def _modes(self, lang):
-        modes, w = [], []
-        if self._files[lang]:
-            modes.append("real"); w.append(self.cfg.p_real)
-        modes.append("words"); w.append(self.cfg.p_words if self._files[lang] else max(self.cfg.p_words, 0.4))
-        modes.append("random"); w.append(self.cfg.p_random)
-        return modes, w
 
     def _target_len(self, rng, t):
         lo, hi = self.cfg.len_chars
         return randint(rng, (lo, max(lo, int(lerp(lo, hi, t)))))
 
     def _real_line(self, rng, n, lang):
-        files = self._files[lang]
-        raw = _read_flat(files[int(rng.integers(0, len(files)))])
+        g = choice(rng, self._groups[lang], self._dir_w[lang])   # pick folder by weight
+        raw = _read_flat(g[int(rng.integers(0, len(g)))])         # random file inside it
         if len(raw) <= 2:
             return ""
         if len(raw) <= n:
@@ -152,28 +149,35 @@ class TextSampler:
                 return raw[start:end] + "-"
         return raw[start:last_space] if last_space > start else raw[start:end]
 
-    def _word_salad(self, rng, n, lang):
-        words = self._words[lang]
+    def _builtin_line(self, rng, n, lang):
+        words = self._builtin[lang]
         out, total = [], 0
         while total < n and words:
             w = words[int(rng.integers(0, len(words)))]
             out.append(w); total += len(w) + 1
-        joined = " ".join(out)
-        return joined[:n].rsplit(" ", 1)[0] if len(joined) > n else joined
+        j = " ".join(out)
+        return j[:n].rsplit(" ", 1)[0] if len(j) > n else j
 
-    def _random_glyphs(self, rng, n, lang):
-        lo, up, dig, pun = getattr(self, f"_{lang}_pools")
-        chars, prev_space = [], True
-        for _ in range(n):
-            if not prev_space and rng.random() < 0.16:
-                chars.append(" ")
-            elif dig and chance(rng, self.cfg.p_digits_in_random * 0.4):
-                chars.append(dig[int(rng.integers(0, len(dig)))])
-            elif pun and (not prev_space) and chance(rng, self.cfg.p_punct_in_random * 0.25):
-                chars.append(pun[int(rng.integers(0, len(pun)))])
-            elif up and prev_space and chance(rng, 0.12):
-                chars.append(up[int(rng.integers(0, len(up)))])
-            else:
-                chars.append(lo[int(rng.integers(0, len(lo)))])
-            prev_space = chars[-1] == " "
-        return "".join(chars).strip()
+    def _apply_errors(self, s, lang, rng):
+        c = self.cfg
+        if not s or not chance(rng, c.p_text_error):
+            return s
+        conf = self._conf[lang]
+        chars = list(s)
+        for i, ch in enumerate(chars):
+            low = ch.lower()
+            if low in conf and chance(rng, c.p_letter_sub):
+                r = conf[low]
+                chars[i] = r.upper() if ch.isupper() else r
+        s = "".join(chars)
+        if chance(rng, c.p_drop_punct):
+            idx = [i for i, ch in enumerate(s) if not ch.isalnum() and not ch.isspace()]
+            if idx:
+                j = idx[int(rng.integers(0, len(idx)))]
+                s = s[:j] + s[j + 1:]
+        if chance(rng, c.p_typo):
+            letters = [i for i, ch in enumerate(s) if ch.isalpha()]
+            if letters:
+                j = letters[int(rng.integers(0, len(letters)))]
+                s = (s[:j] + s[j] + s[j:]) if rng.random() < 0.5 else (s[:j] + s[j + 1:])
+        return _WS.sub(" ", s).strip()

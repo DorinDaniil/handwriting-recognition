@@ -10,6 +10,8 @@ model:
 data:
   ru_text_dirs: [/mnt/DATA2/dorin/handwriting-recognition/data/ru_texts]
   en_text_dirs: [/mnt/DATA2/dorin/handwriting-recognition/data/en_texts]
+  ru_text_weights: []        # вес каждой ru-папки (длина == ru_text_dirs); [] = по числу файлов
+  en_text_weights: []
   ru_font_dirs: [assets/fonts_ru]
   en_font_dirs: [assets/fonts_en]
   p_ru: 0.5                  # share of Russian lines (rest English)
@@ -18,8 +20,6 @@ data:
   val_samples: 500           # fixed synthetic val (mix EN+RU); replace with real lines later
   len_chars: [8, 50]
   p_hyphenate: 0.15
-  p_words: 0.10
-  p_random: 0.10
 
 synth:
   warmup_steps: 8000         # curriculum ramp (difficulty 0 -> 1)

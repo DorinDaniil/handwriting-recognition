@@ -36,8 +36,9 @@ def main(config_path, resume):
     gen = HandwrittenLineGenerator.from_dirs(
         ru_text_dirs=list(cfg.data.ru_text_dirs), en_text_dirs=list(cfg.data.en_text_dirs),
         ru_font_dirs=list(cfg.data.ru_font_dirs), en_font_dirs=list(cfg.data.en_font_dirs),
+        ru_text_weights=list(cfg.data.get("ru_text_weights", [])),
+        en_text_weights=list(cfg.data.get("en_text_weights", [])),
         p_ru=cfg.data.p_ru, len_chars=tuple(cfg.data.len_chars), p_hyphenate=cfg.data.p_hyphenate,
-        p_words=cfg.data.p_words, p_random=cfg.data.p_random,
         warmup_steps=cfg.synth.warmup_steps, seed=cfg.synth.seed)
 
     train_loader, val_loader, step_counter = build_dataloaders(gen, processor, cfg)

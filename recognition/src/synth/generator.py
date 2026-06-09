@@ -56,19 +56,25 @@ class HandwrittenLineGenerator:
     @classmethod
     def from_dirs(cls, ru_text_dirs=(), en_text_dirs=(),
                   ru_font_dirs=("assets/fonts_ru",), en_font_dirs=("assets/fonts_en",), *,
-                  p_ru=0.5, len_chars=(8, 50), p_hyphenate=0.15, p_words=0.10,
-                  p_random=0.15, glob="*.txt", cache_dir=None, **cfg_kwargs):
-        """Build from per-language folders of .txt and fonts. ``p_words=p_random=0`` ->
-        only real corpus text. Other kwargs go to SynthConfig (curriculum, warmup_steps, ...)."""
+                  ru_text_weights=(), en_text_weights=(),
+                  p_ru=None, len_chars=None, p_hyphenate=None, glob="*.txt",
+                  cache_dir=None, **cfg_kwargs):
+        """Build from per-language folders. ``*_text_weights`` (len == dirs) bias which
+        folder is sampled more often. Only explicitly passed knobs override CorpusConfig
+        defaults. Empty text dirs -> built-in word fallback."""
         def _t(x):
             return (str(x),) if isinstance(x, (str, Path)) else tuple(str(p) for p in x)
-        cfg = SynthConfig(
-            corpus=CorpusConfig(ru_text_dirs=_t(ru_text_dirs), en_text_dirs=_t(en_text_dirs),
-                                glob=glob, cache_dir=cache_dir, p_ru=float(p_ru),
-                                len_chars=tuple(len_chars), p_hyphenate=float(p_hyphenate),
-                                p_words=float(p_words), p_random=float(p_random)),
-            font=FontConfig(ru_font_dirs=_t(ru_font_dirs), en_font_dirs=_t(en_font_dirs)),
-            **cfg_kwargs)
+        corpus = dict(ru_text_dirs=_t(ru_text_dirs), en_text_dirs=_t(en_text_dirs),
+                      ru_text_weights=tuple(ru_text_weights), en_text_weights=tuple(en_text_weights),
+                      glob=glob, cache_dir=cache_dir)
+        for key, val in (("p_ru", p_ru), ("p_hyphenate", p_hyphenate)):
+            if val is not None:
+                corpus[key] = float(val)
+        if len_chars is not None:
+            corpus["len_chars"] = tuple(len_chars)
+        cfg = SynthConfig(corpus=CorpusConfig(**corpus),
+                          font=FontConfig(ru_font_dirs=_t(ru_font_dirs), en_font_dirs=_t(en_font_dirs)),
+                          **cfg_kwargs)
         return cls(cfg)
 
     def difficulty(self, step: int) -> float:
