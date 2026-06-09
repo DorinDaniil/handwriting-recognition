@@ -1,14 +1,5 @@
-"""Synthetic pretrain loop for TrOCR-small (Russian).
-
-Two-phase schedule (decided in lieu of a separate "tune" script):
-  * phase 1 — the DeiT vision encoder is frozen for ``trainer.freeze_encoder_steps``
-    so the freshly initialised decoder embeddings/head adapt without corrupting the
-    pretrained visual features;
-  * phase 2 — encoder unfrozen, everything trains end-to-end.
-
-Infinite synthetic stream -> trained by ``max_steps``. Checkpoints: ``last.pt``
-(resumable) and ``best/`` (HF ``save_pretrained``, by val CER). Logs to history.jsonl.
-"""
+"""Synthetic pretrain loop for TrOCR-small. Encoder frozen for the first
+``freeze_encoder_steps`` (so fresh decoder rows settle), then unfrozen."""
 from __future__ import annotations
 
 import json
@@ -20,20 +11,19 @@ import torch
 _AMP = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
 
 
-def _set_encoder_trainable(model, flag: bool) -> None:
+def _set_encoder_trainable(model, flag):
     for p in model.encoder.parameters():
         p.requires_grad_(flag)
 
 
-def _log(path: Path, row: dict) -> None:
+def _log(path, row):
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def _save_ckpt(path, model, opt, sched, scaler, step, best) -> None:
-    torch.save({"step": step, "best": best, "model": model.state_dict(),
-                "opt": opt.state_dict(), "sched": sched.state_dict(),
-                "scaler": scaler.state_dict()}, path)
+def _save_ckpt(path, model, opt, sched, scaler, step, best):
+    torch.save({"step": step, "best": best, "model": model.state_dict(), "opt": opt.state_dict(),
+                "sched": sched.state_dict(), "scaler": scaler.state_dict()}, path)
 
 
 def _load_ckpt(path, model, opt, sched, scaler, device):
@@ -49,21 +39,18 @@ def evaluate(model, processor, val_loader, device, num_beams, max_len):
     model.eval()
     refs, preds = [], []
     for batch in val_loader:
-        ids = model.generate(batch["pixel_values"].to(device),
-                             num_beams=num_beams, max_length=max_len)
+        ids = model.generate(batch["pixel_values"].to(device), num_beams=num_beams, max_length=max_len)
         preds += processor.tokenizer.batch_decode(ids, skip_special_tokens=True)
         refs += batch["texts"]
     model.train()
     return float(jiwer.cer(refs, preds)), float(jiwer.wer(refs, preds))
 
 
-def train_model(model, processor, train_loader, val_loader, config,
-                step_counter=None, resume: bool = False):
+def train_model(model, processor, train_loader, val_loader, config, step_counter=None, resume=False):
     from transformers import get_cosine_schedule_with_warmup
 
     t = config.trainer
-    device = torch.device(config.get("device", "cuda")
-                          if torch.cuda.is_available() else "cpu")
+    device = torch.device(config.get("device", "cuda") if torch.cuda.is_available() else "cpu")
     model.to(device)
     out = Path(t.output_dir); out.mkdir(parents=True, exist_ok=True)
 
@@ -73,8 +60,7 @@ def train_model(model, processor, train_loader, val_loader, config,
 
     frozen = t.get("freeze_encoder_steps", 0) > 0
     _set_encoder_trainable(model, not frozen)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=t.lr,
-                                  weight_decay=t.get("weight_decay", 0.01))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=t.lr, weight_decay=t.get("weight_decay", 0.01))
     scheduler = get_cosine_schedule_with_warmup(optimizer, t.warmup_steps, t.max_steps)
 
     step, best = 0, float("inf")
@@ -114,9 +100,8 @@ def train_model(model, processor, train_loader, val_loader, config,
             step_counter.value = step
 
         if step % t.get("log_every", 50) == 0:
-            its = step / (time.time() - t0)
             print(f"step {step}/{t.max_steps}  loss {loss.item():.3f}  "
-                  f"lr {scheduler.get_last_lr()[0]:.2e}  {its:.1f} it/s")
+                  f"lr {scheduler.get_last_lr()[0]:.2e}  {step / (time.time() - t0):.1f} it/s")
 
         if step % t.eval_every == 0 or step == t.max_steps:
             cer, wer = evaluate(model, processor, val_loader, device,
@@ -127,5 +112,5 @@ def train_model(model, processor, train_loader, val_loader, config,
             if cer < best:
                 best = cer
                 model.save_pretrained(out / "best"); processor.save_pretrained(out / "best")
-                print(f"  saved best (CER {best:.4f}) -> {out / 'best'}")
+                print(f"  saved best (CER {best:.4f})")
     print("done.")

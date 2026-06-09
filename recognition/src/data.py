@@ -1,11 +1,4 @@
-"""Data plumbing for TrOCR training on synthetic lines.
-
-- ``SynthLineDataset`` — infinite, worker-safe stream from the generator. A shared
-  step counter (set by the trainer each step) drives the curriculum.
-- ``FixedSynthValDataset`` — a small fixed synthetic set for a stable val curve
-  (swap in real line crops here later for honest CER).
-- ``TrOCRCollator`` — runs the image processor + tokenizer, masks pad with -100.
-"""
+"""Datasets + collator for TrOCR training on synthetic lines."""
 from __future__ import annotations
 
 import multiprocessing as mp
@@ -17,6 +10,7 @@ from .synth import HandwrittenLineGenerator, make_generator
 
 
 class SynthLineDataset(IterableDataset):
+    """Infinite stream. A shared step counter (set by the trainer) drives the curriculum."""
     def __init__(self, gen: HandwrittenLineGenerator, base_seed: int = 42, step_counter=None):
         self.gen, self.base_seed, self.step_counter = gen, base_seed, step_counter
 
@@ -24,7 +18,7 @@ class SynthLineDataset(IterableDataset):
         info = torch.utils.data.get_worker_info()
         wid = info.id if info is not None else 0
         if info is not None:
-            self.gen.warm_cache()                       # pre-open fonts once per worker
+            self.gen.warm_cache()
         i = 0
         while True:
             step = self.step_counter.value if self.step_counter is not None else i
@@ -57,17 +51,14 @@ class TrOCRCollator:
         pixel_values = self.p(images=images, return_tensors="pt").pixel_values
         labels = self.p.tokenizer(texts, padding="longest", truncation=True,
                                   max_length=self.max_len, return_tensors="pt").input_ids
-        labels[labels == self.p.tokenizer.pad_token_id] = -100      # ignore pad in the loss
+        labels[labels == self.p.tokenizer.pad_token_id] = -100
         return {"pixel_values": pixel_values, "labels": labels, "texts": texts}
 
 
 def build_dataloaders(gen, processor, cfg):
-    """Returns (train_loader, val_loader, step_counter). The step counter is a shared
-    value the trainer bumps each step so workers see the current curriculum step."""
     step_counter = mp.Value("i", 0)
     collator = TrOCRCollator(processor, cfg.model.max_target_len)
     nw = cfg.data.num_workers
-
     train_loader = DataLoader(
         SynthLineDataset(gen, base_seed=cfg.synth.seed, step_counter=step_counter),
         batch_size=cfg.data.batch_size, num_workers=nw, collate_fn=collator,
@@ -75,7 +66,6 @@ def build_dataloaders(gen, processor, cfg):
     )
     val_loader = DataLoader(
         FixedSynthValDataset(gen, n=cfg.data.val_samples, seed=cfg.synth.seed + 1),
-        batch_size=max(1, cfg.data.batch_size // 2), num_workers=min(2, nw),
-        collate_fn=collator,
+        batch_size=max(1, cfg.data.batch_size // 2), num_workers=min(2, nw), collate_fn=collator,
     )
     return train_loader, val_loader, step_counter

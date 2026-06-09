@@ -1,11 +1,4 @@
-"""Procedural paper substrates: plain / ruled (линейка) / grid (клетка) / real-scan crop.
-
-Grid + ruled notebook paper is the dominant background in Russian school
-handwriting, so it gets first-class treatment. Lines are drawn at a sampled
-spacing with a *random phase* so the text doesn't always sit exactly on a rule.
-Everything is cheap PIL/numpy; an optional pre-rendered pool (see assets) can
-replace live drawing if the grid cost ever dominates throughput.
-"""
+"""Procedural paper: plain / ruled / grid / real-scan crop, + margin and vignette."""
 from __future__ import annotations
 
 import numpy as np
@@ -21,7 +14,7 @@ class PaperBackground:
         self.cfg = cfg
         self.pool = RealPaperPool(cfg.real_paper_dir)
 
-    def make(self, size_wh: tuple[int, int], rng, t: float = 1.0) -> Image.Image:
+    def make(self, size_wh, rng, t: float = 1.0) -> Image.Image:
         w, h = int(size_wh[0]), int(size_wh[1])
         cfg = self.cfg
         kinds = ["plain", "ruled", "grid"]
@@ -46,63 +39,57 @@ class PaperBackground:
             img = self._vignette(img, v)
         return img
 
-    # ----------------------------------------------------------- internals
-
-    def _paper_field(self, w: int, h: int, rng) -> np.ndarray:
+    def _paper_field(self, w, h, rng):
         color = self.cfg.paper_colors[int(rng.integers(0, len(self.cfg.paper_colors)))]
         base = np.empty((h, w, 3), dtype=np.float32)
         base[:] = color
         if self.cfg.fiber_noise > 0:
-            noise = rng.normal(0.0, self.cfg.fiber_noise * 255.0, size=(h, w, 1)).astype(np.float32)
-            base += noise
+            base += rng.normal(0.0, self.cfg.fiber_noise * 255.0, size=(h, w, 1)).astype(np.float32)
         return np.clip(base, 0, 255).astype(np.uint8)
 
-    def _line_overlay(self, img: Image.Image) -> tuple[Image.Image, ImageDraw.ImageDraw]:
-        overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-        return overlay, ImageDraw.Draw(overlay)
+    def _overlay(self, img):
+        ov = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        return ov, ImageDraw.Draw(ov)
 
-    def _blend(self, img: Image.Image, overlay: Image.Image) -> None:
-        img.paste(Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB"), (0, 0))
+    def _blend(self, img, ov):
+        img.paste(Image.alpha_composite(img.convert("RGBA"), ov).convert("RGB"), (0, 0))
 
-    def _draw_ruled(self, img, rng) -> None:
+    def _draw_ruled(self, img, rng):
         w, h = img.size
         sp = randint(rng, self.cfg.rule_spacing_px)
         col = self.cfg.rule_colors[int(rng.integers(0, len(self.cfg.rule_colors)))]
         a = int(uniform(rng, self.cfg.rule_alpha) * 255)
-        phase = int(rng.integers(0, sp))
-        ov, d = self._line_overlay(img)
-        for y in range(phase, h, sp):
-            d.line([(0, y), (w, y)], fill=(col[0], col[1], col[2], a), width=1)
+        ov, d = self._overlay(img)
+        for y in range(int(rng.integers(0, sp)), h, sp):
+            d.line([(0, y), (w, y)], fill=(*col, a), width=1)
         self._blend(img, ov)
 
-    def _draw_grid(self, img, rng) -> None:
+    def _draw_grid(self, img, rng):
         w, h = img.size
         sp = randint(rng, self.cfg.grid_spacing_px)
         col = self.cfg.rule_colors[int(rng.integers(0, len(self.cfg.rule_colors)))]
         a = int(uniform(rng, self.cfg.rule_alpha) * 255)
-        px, py = int(rng.integers(0, sp)), int(rng.integers(0, sp))
-        ov, d = self._line_overlay(img)
-        for y in range(py, h, sp):
-            d.line([(0, y), (w, y)], fill=(col[0], col[1], col[2], a), width=1)
-        for x in range(px, w, sp):
-            d.line([(x, 0), (x, h)], fill=(col[0], col[1], col[2], a), width=1)
+        ov, d = self._overlay(img)
+        for y in range(int(rng.integers(0, sp)), h, sp):
+            d.line([(0, y), (w, y)], fill=(*col, a), width=1)
+        for x in range(int(rng.integers(0, sp)), w, sp):
+            d.line([(x, 0), (x, h)], fill=(*col, a), width=1)
         self._blend(img, ov)
 
-    def _draw_margin(self, img, rng) -> None:
+    def _draw_margin(self, img, rng):
         w, h = img.size
         col = self.cfg.margin_color
         a = int(uniform(rng, self.cfg.rule_alpha) * 255)
         x = int(uniform(rng, (0.06, 0.16)) * w)
-        ov, d = self._line_overlay(img)
-        d.line([(x, 0), (x, h)], fill=(col[0], col[1], col[2], a), width=1)
+        ov, d = self._overlay(img)
+        d.line([(x, 0), (x, h)], fill=(*col, a), width=1)
         self._blend(img, ov)
 
     @staticmethod
-    def _vignette(img: Image.Image, strength: float) -> Image.Image:
+    def _vignette(img, strength):
         w, h = img.size
         yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
         cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
         r2 = ((xx - cx) / (cx + 1e-3)) ** 2 + ((yy - cy) / (cy + 1e-3)) ** 2
-        factor = (1.0 - strength * np.clip(r2, 0, 1))[:, :, None]
-        out = np.asarray(img, dtype=np.float32) * factor
+        out = np.asarray(img, dtype=np.float32) * (1.0 - strength * np.clip(r2, 0, 1))[:, :, None]
         return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8), "RGB")

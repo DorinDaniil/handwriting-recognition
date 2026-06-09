@@ -1,75 +1,61 @@
-"""Train a compact Russian (Cyrillic) BPE tokenizer for TrOCR-small.
+"""Extend the English TrOCR tokenizer with Russian tokens (Cyrillic chars + frequent words).
 
-Trains a byte-level BPE on your .txt corpus (the same folders you feed the
-generator) and saves a HuggingFace-loadable tokenizer with TrOCR's RoBERTa-style
-special tokens (<s> <pad> </s> <unk> <mask>). Byte-level BPE covers all Cyrillic.
+English ids stay unchanged; new RU tokens are appended -> model.decoder.resize_token_embeddings
+keeps English rows and adds rows for the new ones.
 
-    python scripts/train_tokenizer.py --text-dirs /mnt/.../data/texts --vocab-size 4000
-
-Load it later with:
-    from transformers import AutoTokenizer
-    tok = AutoTokenizer.from_pretrained("assets/tokenizer_ru")
-
-Tip: a small vocab (2000-8000) is plenty for handwriting and keeps the decoder
-embedding matrix light. For the leanest, most robust option you can also skip
-training and use a char-level vocab, or keep the English byte-BPE (then every
-weight loads, see src/model.build_trocr_small).
+    python scripts/train_tokenizer.py --ru-text-dirs /data/ru_texts --add-words 4000
 """
 from __future__ import annotations
 
 import argparse
+import re
+from collections import Counter
 from pathlib import Path
 
-SPECIAL = ["<s>", "<pad>", "</s>", "<unk>", "<mask>"]
+RU_LETTERS = "абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
+_WORD = re.compile(f"[{RU_LETTERS}]+")
 
 
-def iter_txt(dirs, glob: str):
+def iter_txt(dirs, glob):
     for d in dirs:
         root = Path(d)
         if not root.exists():
-            print(f"  warn: missing dir {d}")
-            continue
+            print(f"  warn: missing {d}"); continue
         for p in root.rglob(glob):
             if p.is_file():
-                yield str(p)
+                yield p
 
 
-def main() -> int:
+def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--text-dirs", nargs="+", required=True, help="folders with .txt")
-    ap.add_argument("--vocab-size", type=int, default=4000)
-    ap.add_argument("--min-frequency", type=int, default=2)
+    ap.add_argument("--ru-text-dirs", nargs="+", required=True)
+    ap.add_argument("--pretrained", default="microsoft/trocr-small-handwritten")
+    ap.add_argument("--add-words", type=int, default=4000)
+    ap.add_argument("--min-freq", type=int, default=3)
     ap.add_argument("--glob", default="*.txt")
-    ap.add_argument("--out", type=Path,
-                    default=Path(__file__).resolve().parents[1] / "assets" / "tokenizer_ru")
+    ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parents[1] / "assets" / "tokenizer_bi")
     args = ap.parse_args()
 
-    files = list(iter_txt(args.text_dirs, args.glob))
-    if not files:
-        raise SystemExit("no .txt files found under --text-dirs")
-    print(f"training on {len(files)} files -> vocab {args.vocab_size}")
+    from transformers import AutoTokenizer
+    tok = AutoTokenizer.from_pretrained(args.pretrained)
+    old = len(tok)
 
-    from tokenizers import ByteLevelBPETokenizer
+    cnt = Counter()
+    for p in iter_txt(args.ru_text_dirs, args.glob):
+        cnt.update(_WORD.findall(p.read_text(encoding="utf-8", errors="ignore")))
+    if not cnt:
+        raise SystemExit("no Russian words found under --ru-text-dirs")
 
-    bpe = ByteLevelBPETokenizer()
-    bpe.train(files=files, vocab_size=args.vocab_size,
-              min_frequency=args.min_frequency, special_tokens=SPECIAL)
+    vocab = set(tok.get_vocab())
+    words = [w for w, c in cnt.most_common(args.add_words) if c >= args.min_freq]
+    candidates = list(dict.fromkeys(list(RU_LETTERS) + words))
+    added = tok.add_tokens([t for t in candidates if t not in vocab])
+
     args.out.mkdir(parents=True, exist_ok=True)
-    bpe.save_model(str(args.out))
-
-    # wrap as a HF fast tokenizer (RoBERTa-style) so AutoTokenizer can load it
-    from transformers import RobertaTokenizerFast
-
-    fast = RobertaTokenizerFast(
-        vocab_file=str(args.out / "vocab.json"),
-        merges_file=str(args.out / "merges.txt"),
-        bos_token="<s>", eos_token="</s>", pad_token="<pad>",
-        unk_token="<unk>", mask_token="<mask>",
-    )
-    fast.save_pretrained(str(args.out))
-    print(f"tokenizer -> {args.out}  (vocab {fast.vocab_size})")
-    sample = "пример рукописной строки 2026"
-    print("roundtrip:", repr(fast.decode(fast(sample).input_ids, skip_special_tokens=True)))
+    tok.save_pretrained(str(args.out))
+    print(f"vocab {old} -> {len(tok)}  (+{added})  -> {args.out}")
+    print("RU:", tok.tokenize("пример рукописной строки 2026"))
+    print("EN:", tok.tokenize("the quick brown fox"))
     return 0
 
 

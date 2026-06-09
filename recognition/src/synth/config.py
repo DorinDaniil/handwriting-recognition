@@ -1,28 +1,18 @@
-"""Configuration for the synthetic handwritten-line generator.
-
-Mirrors the dataclass-config style of the detection project
-(see ``detection/src/augmentation.py``): every knob is a documented field with a
-sensible default, ranges are ``(lo, hi)`` sampled uniformly, and ``p_*`` fields
-are probabilities in ``[0, 1]``. Nested groups keep the eventual YAML readable
-and let the training-time *curriculum* scale each group independently
-(see :func:`synth.rng.scale_p` / :func:`synth.rng.lerp`).
-
-Nothing here imports torch / albumentations — this module is pure data so it can
-be unit-tested and built from an OmegaConf node exactly like the detection
-configs are (``_build_aug_cfg`` in ``detection/train.py``).
-"""
+"""Config dataclasses for the bilingual (EN+RU) synthetic line generator."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# Full active character set. ё/Ё/й/ъ/щ are kept deliberately — they are the
-# glyphs most often missing from free "handwriting" fonts, so they must be part
-# of the coverage check (see synth.fonts.FontBank).
-DEFAULT_CHARSET: str = (
+_DIGITS = "0123456789"
+_PUNCT = " .,!?;:-—()\"'/%"
+
+RU_CHARSET: str = (
     "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
-    "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
-    "0123456789"
-    " .,!?;:-—()«»\"'/№%"
+    "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ" + _DIGITS + _PUNCT + "«»№"
+)
+EN_CHARSET: str = (
+    "abcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ" + _DIGITS + _PUNCT + "&@#"
 )
 
 RGB = tuple[int, int, int]
@@ -30,184 +20,144 @@ RGB = tuple[int, int, int]
 
 @dataclass
 class CorpusConfig:
-    """Where target strings come from and how long they are.
-
-    The main mode is **real**: point ``text_dirs`` at one or more folders of .txt
-    files and the sampler walks them at random, reads a file, and cuts a
-    running-text *line* of varying length (optionally hyphenated at the break —
-    перенос). No need to pre-concatenate, split into words, or clean anything.
-    """
-    text_dirs: tuple[str, ...] = ()          # folders of .txt — walked recursively, picked at random
-    real_text_files: tuple[str, ...] = ()    # explicit .txt files added to the same pool
-    word_lists: tuple[str, ...] = ()         # optional frequency word lists (word-salad mode)
-    glob: str = "*.txt"                      # which files to collect under text_dirs
-    # mode mix (renormalized internally) — real running text dominates; word-salad
-    # widens vocabulary, random glyphs harden rare chars/digits/punctuation
-    p_real: float = 0.75
+    ru_text_dirs: tuple[str, ...] = ()
+    en_text_dirs: tuple[str, ...] = ()
+    glob: str = "*.txt"
+    cache_dir: str | None = None             # file-list manifest cache (delete to rescan)
+    p_ru: float = 0.5                        # share of Russian lines
+    p_real: float = 0.75                     # mode mix: real text / word salad / random glyphs
     p_words: float = 0.10
     p_random: float = 0.15
-    len_chars: tuple[int, int] = (8, 50)     # target line length in characters (varies the image size)
-    p_hyphenate: float = 0.15                # end a line mid-word with '-' (перенос), like real wrapping
-    flatten_newlines: bool = True            # treat the source as running text (newlines -> spaces)
+    len_chars: tuple[int, int] = (8, 50)
+    p_hyphenate: float = 0.15                # end a line mid-word with '-'
+    flatten_newlines: bool = True
     p_digits_in_random: float = 0.35
     p_punct_in_random: float = 0.25
-    lowercase_prob: float = 0.0              # TrOCR-handwritten is cased; keep 0 normally
+    lowercase_prob: float = 0.0
 
 
 @dataclass
 class FontConfig:
-    """The pool of Cyrillic handwriting fonts and how it is sampled."""
-    font_dirs: tuple[str, ...] = ("assets/fonts",)
-    sizes_px: tuple[int, int] = (28, 56)     # glyph pixel size range (pre-cached integers)
-    # drop a font if it covers less than this fraction of the active charset; rare
-    # punctuation (№ « » —) that a font lacks is dropped per-line by FontEntry.filter,
-    # so this only needs to be high enough to reject Latin-only / uppercase-only fonts.
-    min_glyph_coverage: float = 0.85
-    weight_by_coverage: bool = True          # prefer fonts that cover more of the charset
-    cache_warm: bool = True                  # pre-open (font, size) combos in worker_init_fn
+    ru_font_dirs: tuple[str, ...] = ("assets/fonts_ru",)
+    en_font_dirs: tuple[str, ...] = ("assets/fonts_en",)
+    sizes_px: tuple[int, int] = (28, 56)
+    min_glyph_coverage: float = 0.80         # drops Latin-only fonts from the RU pool and vice-versa
+    weight_by_coverage: bool = True
 
 
 @dataclass
 class RenderConfig:
-    """Per-glyph ink rendering: the handwriting "feel" lives here."""
     ink_colors: tuple[RGB, ...] = (
-        (20, 20, 28),     # near-black ink
-        (28, 40, 120),    # blue ballpoint
-        (40, 60, 160),    # lighter blue
-        (70, 70, 75),     # graphite / faded
+        (20, 20, 28), (28, 40, 120), (40, 60, 160), (70, 70, 75),
     )
-    p_pencil: float = 0.25                    # lower alpha + more grain (pencil look)
-    baseline_wobble_px: tuple[float, float] = (0.0, 2.5)   # smooth vertical undulation amplitude
-    slant_deg: tuple[float, float] = (-8.0, 12.0)          # italic shear (handwriting slant), per line
-    line_rotate_deg: tuple[float, float] = (-3.0, 3.0)     # small whole-line tilt; baked into ink, no white frame
+    p_pencil: float = 0.25
+    baseline_wobble_px: tuple[float, float] = (0.0, 2.5)
+    slant_deg: tuple[float, float] = (-8.0, 12.0)          # italic shear
+    line_rotate_deg: tuple[float, float] = (-3.0, 3.0)     # whole-line tilt
     per_glyph_rot_deg: tuple[float, float] = (-4.0, 4.0)
-    spacing_jitter: tuple[float, float] = (-0.12, 0.20)    # fraction of glyph advance width
-    size_jitter: tuple[float, float] = (0.92, 1.08)        # per-glyph scale
+    spacing_jitter: tuple[float, float] = (-0.12, 0.20)
+    size_jitter: tuple[float, float] = (0.92, 1.08)
     ink_alpha: tuple[float, float] = (0.80, 1.0)
     pencil_alpha: tuple[float, float] = (0.45, 0.78)
-    stroke_grain: float = 0.20               # dry-pen alpha texture strength (0 disables)
-    pad_px: int = 6                          # transparent padding around the tight crop
+    stroke_grain: float = 0.20
+    pad_px: int = 6
 
 
 @dataclass
 class PaperConfig:
-    """The substrate the ink is composited onto."""
     paper_colors: tuple[RGB, ...] = (
-        (252, 250, 244),  # cream
-        (245, 242, 230),  # aged
-        (255, 255, 255),  # white
-        (238, 232, 210),  # tan
+        (252, 250, 244), (245, 242, 230), (255, 255, 255), (238, 232, 210),
     )
-    # substrate type mix (renormalized) — клетка (grid) is very common in RU notebooks
     p_plain: float = 0.40
-    p_ruled: float = 0.30                     # линейка (horizontal rules)
-    p_grid: float = 0.22                      # клетка (square grid)
-    p_real_crop: float = 0.08                 # paste onto a crop from a real-paper pool
+    p_ruled: float = 0.30
+    p_grid: float = 0.22
+    p_real_crop: float = 0.08
     rule_spacing_px: tuple[int, int] = (26, 40)
     grid_spacing_px: tuple[int, int] = (18, 30)
     rule_colors: tuple[RGB, ...] = ((150, 170, 210), (180, 180, 190))
     rule_alpha: tuple[float, float] = (0.25, 0.6)
-    p_margin_line: float = 0.35               # red vertical поля
+    p_margin_line: float = 0.35
     margin_color: RGB = (200, 70, 70)
-    fiber_noise: float = 0.015               # paper grain (std of per-pixel gaussian)
+    fiber_noise: float = 0.015
     vignette: tuple[float, float] = (0.0, 0.12)
     real_paper_dir: str | None = None
-    use_cache_pool: bool = False             # sample pre-rendered substrates (faster, see assets)
+    use_cache_pool: bool = False
 
 
 @dataclass
 class EffectsConfig:
-    """Compositing + capture degradation. Geometry is LINE-SAFE: no flips, no 90° rotations."""
     p_show_through: float = 0.10
     ink_bleed_px: tuple[float, float] = (0.0, 0.8)
-    # geometry
     p_elastic: float = 0.30
     elastic_alpha: tuple[float, float] = (10.0, 40.0)
     elastic_sigma: tuple[float, float] = (4.0, 7.0)
     p_grid_distort: float = 0.20
     p_perspective: float = 0.25
     perspective_scale: tuple[float, float] = (0.02, 0.06)
-    # NB: line slant/tilt is rendered into the ink layer (see render.py), so there is
-    # no image-level rotation here — that would add a white/blank frame around the line.
-    p_baseline_curve: float = 0.15           # custom: sinusoidal row remap (albumentations has none)
-    # photometric / capture
+    p_baseline_curve: float = 0.15
     p_blur: float = 0.30
     p_motion_blur: float = 0.10
     p_gauss_noise: float = 0.30
     p_iso_noise: float = 0.15
     p_brightness_contrast: float = 0.45
     p_gamma: float = 0.20
-    p_illumination: float = 0.25             # custom: smooth lighting gradient multiply
+    p_illumination: float = 0.25
     p_jpeg: float = 0.35
     jpeg_quality: tuple[int, int] = (35, 92)
-    p_downscale: float = 0.25                # scan-style blur via downscale→upscale
+    p_downscale: float = 0.25
     downscale_range: tuple[float, float] = (0.5, 0.85)
 
 
 @dataclass
 class OutputConfig:
-    """The line is delivered as a TIGHT crop on its paper substrate — no white
-    letterbox/padding around it. The shorter side is scaled to ``min_side`` and the
-    aspect ratio is preserved, so wide lines stay wide and the text fills the frame."""
-    min_side: int = 224              # target shorter side in px (ALWAYS scaled to this)
-    max_side: int | None = None      # optional longer-side cap; if set, short side may drop below min_side
-    margin_frac: tuple[float, float] = (0.06, 0.22)  # paper around the ink, fraction of line height
-    min_height_px: int = 24          # reject degenerate renders below this (before the final resize) height
+    min_side: int = 224                      # shorter side after resize; aspect kept
+    max_side: int | None = None
+    margin_frac: tuple[float, float] = (0.06, 0.22)
+    min_height_px: int = 24
 
 
 @dataclass
 class SynthConfig:
-    """Top-level config aggregating every stage of the generator."""
     corpus: CorpusConfig = field(default_factory=CorpusConfig)
     font: FontConfig = field(default_factory=FontConfig)
     render: RenderConfig = field(default_factory=RenderConfig)
     paper: PaperConfig = field(default_factory=PaperConfig)
     effects: EffectsConfig = field(default_factory=EffectsConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
-    charset: str = DEFAULT_CHARSET
+    ru_charset: str = RU_CHARSET
+    en_charset: str = EN_CHARSET
     seed: int = 42
-    curriculum: bool = True                   # ramp difficulty t: 0 -> 1 over warmup_steps
+    curriculum: bool = True
     warmup_steps: int = 4000
+
+    def charset(self, lang: str) -> str:
+        return self.ru_charset if lang == "ru" else self.en_charset
+
+
+def _coerce(v):
+    from collections.abc import Sequence
+    if isinstance(v, Sequence) and not isinstance(v, (str, bytes)):
+        return tuple(_coerce(x) for x in v)
+    return v
 
 
 def build_synth_cfg(node) -> SynthConfig:
-    """Build a :class:`SynthConfig` from a mapping / OmegaConf node.
-
-    Mirrors the ``_build_*_cfg`` helpers in ``detection/train.py``: unknown keys
-    are ignored and missing keys fall back to dataclass defaults, so a partial
-    YAML override is enough. Pass ``None`` to get the full default config.
-    """
+    """Build a SynthConfig from a mapping / OmegaConf node (partial overrides ok)."""
     if node is None:
         return SynthConfig()
 
     def _sub(cls, key):
-        raw = node.get(key) if hasattr(node, "get") else node[key] if key in node else None
+        raw = node.get(key) if hasattr(node, "get") else None
         if raw is None:
             return cls()
-        kwargs = {f: _coerce(raw[f]) for f in cls.__dataclass_fields__ if f in raw}
-        return cls(**kwargs)
+        return cls(**{f: _coerce(raw[f]) for f in cls.__dataclass_fields__ if f in raw})
 
+    g = (lambda k, d: node.get(k, d)) if hasattr(node, "get") else (lambda k, d: d)
     return SynthConfig(
-        corpus=_sub(CorpusConfig, "corpus"),
-        font=_sub(FontConfig, "font"),
-        render=_sub(RenderConfig, "render"),
-        paper=_sub(PaperConfig, "paper"),
-        effects=_sub(EffectsConfig, "effects"),
-        output=_sub(OutputConfig, "output"),
-        charset=node.get("charset", DEFAULT_CHARSET) if hasattr(node, "get") else DEFAULT_CHARSET,
-        seed=int(node.get("seed", 42)) if hasattr(node, "get") else 42,
-        curriculum=bool(node.get("curriculum", True)) if hasattr(node, "get") else True,
-        warmup_steps=int(node.get("warmup_steps", 4000)) if hasattr(node, "get") else 4000,
+        corpus=_sub(CorpusConfig, "corpus"), font=_sub(FontConfig, "font"),
+        render=_sub(RenderConfig, "render"), paper=_sub(PaperConfig, "paper"),
+        effects=_sub(EffectsConfig, "effects"), output=_sub(OutputConfig, "output"),
+        ru_charset=g("ru_charset", RU_CHARSET), en_charset=g("en_charset", EN_CHARSET),
+        seed=int(g("seed", 42)), curriculum=bool(g("curriculum", True)),
+        warmup_steps=int(g("warmup_steps", 4000)),
     )
-
-
-def _coerce(v):
-    """OmegaConf returns ListConfig for sequences; convert to plain tuples so the
-    dataclasses hold hashable, picklable values (safe to ship to DataLoader workers)."""
-    try:
-        from collections.abc import Sequence
-        if isinstance(v, Sequence) and not isinstance(v, (str, bytes)):
-            return tuple(_coerce(x) for x in v)
-    except Exception:
-        pass
-    return v

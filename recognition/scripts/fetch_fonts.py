@@ -1,17 +1,8 @@
-"""Download a large pool of free **handwritten Cyrillic** fonts into assets/fonts/.
+"""Bootstrap free handwriting fonts: RU (Cyrillic) -> assets/fonts_ru, EN (Latin) -> assets/fonts_en.
 
-Primary source: the ``fonts/`` folder of NastyBoget/HandwritingGeneration — a
-curated, handwriting-only collection (~75 fonts with Cyrillic). We auto-discover
-it via the GitHub API so you always get the current set; if the API is
-unavailable (rate limit / offline) we fall back to a baked-in file list. A small
-curated set of Google-Fonts handwriting families is added too.
-
-These sources are handwriting/script-oriented, so printed (typeset-looking) fonts
-are kept to a minimum. Coverage is verified later by ``FontBank`` (Latin-only or
-uppercase-only fonts are dropped automatically), so it is fine to grab them all.
+A starter set only — point the config at your own font folders if you have them.
 
     python scripts/fetch_fonts.py
-    python scripts/fetch_fonts.py --out /custom/dir --no-google
 """
 from __future__ import annotations
 
@@ -25,57 +16,40 @@ from pathlib import Path
 
 FONT_EXTS = (".ttf", ".otf", ".ttc")
 
-NASTY_REPO = "NastyBoget/HandwritingGeneration"
-NASTY_BRANCH = "master"
-NASTY_DIR = "fonts"
-NASTY_RAW = f"https://raw.githubusercontent.com/{NASTY_REPO}/{NASTY_BRANCH}/{NASTY_DIR}/"
-
-# Fallback list (used only if the GitHub API can't be reached).
+NASTY = ("NastyBoget/HandwritingGeneration", "master", "fonts")
+NASTY_RAW = f"https://raw.githubusercontent.com/{NASTY[0]}/{NASTY[1]}/{NASTY[2]}/"
 _NASTY_FALLBACK = [f"{i:04d}.ttf" for i in range(10)] + [
-    "Abram.ttf", "Anselmo.ttf", "BadScript-Regular.ttf", "Beer-Money.ttf", "Benvolio.ttf",
-    "Capuletty.ttf", "Caveat-Regular.ttf", "Denistina.ttf", "Discipuli-Britannica.ttf",
-    "Djiovanni.ttf", "Epsilon.ttf", "Eskal.ttf", "Example.ttf", "FestusC.ttf", "Gogol.ttf",
-    "Gregory.ttf", "Gunnyre.ttf", "HansHand-cyr.ttf", "Katherine-Plus.ttf", "Lazy-Crazy.ttf",
-    "Lorenco.ttf", "Marutya.ttf", "May-Regular.ttf", "Meamury.ttf", "Merkucio.ttf",
-    "Montekky.ttf", "NinaC.ttf", "PFScandalPro-Reg.ttf", "Pag.ttf", "Paris.ttf", "Pushkin.ttf",
-    "Salavat.ttf", "Samson.ttf", "Spring-Blush.ttf", "Stefano.ttf", "Tibalt.ttf", "VSerikba.ttf",
-    "Vasek-Italic.ttf", "Voronov.ttf", "Wolgast-Two-Normal-Cyr.ttf",
-    "Blink-Script.otf", "Brush-Font-One.otf", "Celestina.otf", "Elfabe.otf", "Hitch-hike.otf",
-    "Lemon-Tuesday.otf", "MADE-Likes.otf", "Pinata-Celestina.otf", "Romochka.otf", "Simphony.otf",
-    "Solena.otf", "StudioScriptC.otf", "Swanky-And-Moo-Moo-Cyrillic.otf", "Tesla.otf",
-    "Tino-Script.otf",
+    "Abram.ttf", "Anselmo.ttf", "BadScript-Regular.ttf", "Benvolio.ttf", "Capuletty.ttf",
+    "Caveat-Regular.ttf", "Denistina.ttf", "Djiovanni.ttf", "Eskal.ttf", "Gogol.ttf",
+    "Gunnyre.ttf", "HansHand-cyr.ttf", "Marutya.ttf", "Merkucio.ttf", "NinaC.ttf",
+    "Pushkin.ttf", "Salavat.ttf", "Voronov.ttf", "Wolgast-Two-Normal-Cyr.ttf",
+    "Celestina.otf", "Romochka.otf", "Solena.otf", "Swanky-And-Moo-Moo-Cyrillic.otf",
 ]
 
-# Curated Google-Fonts handwriting families known to ship Cyrillic.
-_GOOGLE = [
-    "ofl/marckscript/MarckScript-Regular.ttf",
-    "ofl/badscript/BadScript-Regular.ttf",
-    "ofl/neucha/Neucha.ttf",
-    "ofl/pangolin/Pangolin-Regular.ttf",
-    "ofl/pacifico/Pacifico-Regular.ttf",
-    "ofl/caveat/Caveat[wght].ttf",
-    "ofl/yesevaone/YesevaOne-Regular.ttf",
-    "ofl/underdog/Underdog-Regular.ttf",
+_GOOGLE_EN = [
+    "ofl/caveat/Caveat[wght].ttf", "ofl/dancingscript/DancingScript[wght].ttf",
+    "ofl/indieflower/IndieFlower-Regular.ttf", "ofl/architectsdaughter/ArchitectsDaughter-Regular.ttf",
+    "ofl/patrickhand/PatrickHand-Regular.ttf", "ofl/kalam/Kalam-Regular.ttf",
+    "ofl/pacifico/Pacifico-Regular.ttf", "ofl/sacramento/Sacramento-Regular.ttf",
 ]
-_GOOGLE_RAW = "https://raw.githubusercontent.com/google/fonts/main/"
+GOOGLE_RAW = "https://raw.githubusercontent.com/google/fonts/main/"
 
 
-def _github_listing(repo: str, branch: str, path: str) -> list[tuple[str, str]]:
-    """(name, download_url) for font files in a repo dir, via the GitHub API. [] on failure."""
+def _github_listing(repo, branch, path):
     url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={branch}"
-    req = urllib.request.Request(url, headers={"User-Agent": "synth-fetch-fonts/1.0",
+    req = urllib.request.Request(url, headers={"User-Agent": "fetch-fonts/1.0",
                                                "Accept": "application/vnd.github+json"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             data = json.loads(r.read())
         return [(it["name"], it["download_url"]) for it in data
                 if it.get("type") == "file" and it["name"].lower().endswith(FONT_EXTS)]
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError, KeyError):
+    except Exception:
         return []
 
 
-def _download(url: str, dest: Path) -> bool:
-    req = urllib.request.Request(url, headers={"User-Agent": "synth-fetch-fonts/1.0"})
+def _download(url, dest):
+    req = urllib.request.Request(url, headers={"User-Agent": "fetch-fonts/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             data = r.read()
@@ -83,56 +57,40 @@ def _download(url: str, dest: Path) -> bool:
             return False
         dest.write_bytes(data)
         return True
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
+    except Exception:
         return False
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    default_out = Path(__file__).resolve().parents[1] / "assets" / "fonts"
-    ap.add_argument("--out", type=Path, default=default_out, help="font output dir")
-    ap.add_argument("--no-google", action="store_true", help="skip the Google-Fonts set")
-    args = ap.parse_args()
-    out: Path = args.out
+def _populate(entries, out: Path):
     out.mkdir(parents=True, exist_ok=True)
-
-    # (filename, url) — dedup by filename across sources
-    entries: dict[str, str] = {}
-
-    listing = _github_listing(NASTY_REPO, NASTY_BRANCH, NASTY_DIR)
-    if listing:
-        print(f"NastyBoget: discovered {len(listing)} fonts via GitHub API")
-        for name, dl in listing:
-            entries.setdefault(name, dl)
-    else:
-        print(f"NastyBoget: API unavailable, using baked-in list ({len(_NASTY_FALLBACK)})")
-        for name in _NASTY_FALLBACK:
-            entries.setdefault(name, NASTY_RAW + urllib.parse.quote(name))
-
-    if not args.no_google:
-        for rel in _GOOGLE:
-            entries.setdefault(rel.split("/")[-1], _GOOGLE_RAW + urllib.parse.quote(rel))
-
-    print(f"Downloading up to {len(entries)} fonts -> {out}\n")
     ok = skip = fail = 0
     for name, url in sorted(entries.items()):
         dest = out / name
         if dest.exists():
             skip += 1
-            continue
-        if _download(url, dest):
+        elif _download(url, dest):
             ok += 1
         else:
-            print(f"  FAIL  {name}")
-            fail += 1
+            print(f"  FAIL {name}"); fail += 1
+    n = sum(1 for p in out.iterdir() if p.suffix.lower() in FONT_EXTS)
+    print(f"  {out}: +{ok} new, {skip} present, {fail} failed -> {n} fonts")
 
-    print(f"\nDone: {ok} downloaded, {skip} already present, {fail} failed.")
-    n_fonts = sum(1 for p in out.iterdir() if p.suffix.lower() in FONT_EXTS)
-    print(f"Fonts in {out}: {n_fonts}")
-    if n_fonts == 0:
-        print("\nNo fonts available. Grab handwriting+cyrillic .ttf from fontesk.com / "
-              "localfonts.eu / fontspace.com and drop them into the dir above.")
-        return 1
+
+def main():
+    ap = argparse.ArgumentParser()
+    root = Path(__file__).resolve().parents[1] / "assets"
+    ap.add_argument("--ru-out", type=Path, default=root / "fonts_ru")
+    ap.add_argument("--en-out", type=Path, default=root / "fonts_en")
+    args = ap.parse_args()
+
+    print("RU (Cyrillic):")
+    listing = _github_listing(*NASTY)
+    ru = ({n: u for n, u in listing} if listing
+          else {n: NASTY_RAW + urllib.parse.quote(n) for n in _NASTY_FALLBACK})
+    _populate(ru, args.ru_out)
+
+    print("EN (Latin, Google Fonts):")
+    _populate({rel.split("/")[-1]: GOOGLE_RAW + urllib.parse.quote(rel) for rel in _GOOGLE_EN}, args.en_out)
     return 0
 
 
