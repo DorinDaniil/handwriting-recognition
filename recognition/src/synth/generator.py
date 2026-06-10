@@ -7,15 +7,30 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+import dataclasses
+
 from .backgrounds import PaperBackground
-from .config import CorpusConfig, FontConfig, SynthConfig
+from .config import CorpusConfig, FontConfig, SynthConfig, _coerce
 from .corpus import TextSampler
 from .effects import Compositor, EffectsPipeline
 from .fonts import FontBank
 from .render import LineRenderer
-from .rng import randint, uniform
+from .rng import chance, randint, scale_p, uniform
 
 _WS = re.compile(r"\s+")
+
+
+def _apply_overrides(cfg: SynthConfig, node) -> SynthConfig:
+    """Patch a SynthConfig from a mapping/OmegaConf node, sub-block by sub-block. Only the
+    fields present in the node are changed; everything else keeps its (stage-1) default."""
+    for name in ("corpus", "font", "render", "paper", "effects", "neighbors", "output"):
+        sub = node.get(name) if hasattr(node, "get") else None
+        if not sub:
+            continue
+        cur = getattr(cfg, name)
+        fields = {f: _coerce(sub[f]) for f in cur.__dataclass_fields__ if f in sub}
+        cfg = dataclasses.replace(cfg, **{name: dataclasses.replace(cur, **fields)})
+    return cfg
 
 
 def fit_to_square(img: Image.Image, size: int, pad_color=(255, 255, 255),
@@ -58,10 +73,12 @@ class HandwrittenLineGenerator:
                   ru_font_dirs=("assets/fonts_ru",), en_font_dirs=("assets/fonts_en",), *,
                   ru_text_weights=(), en_text_weights=(),
                   p_ru=None, len_chars=None, p_hyphenate=None, glob="*.txt",
-                  cache_dir=None, **cfg_kwargs):
+                  cache_dir=None, synth_overrides=None, **cfg_kwargs):
         """Build from per-language folders. ``*_text_weights`` (len == dirs) bias which
         folder is sampled more often. Only explicitly passed knobs override CorpusConfig
-        defaults. Empty text dirs -> built-in word fallback."""
+        defaults. Empty text dirs -> built-in word fallback. ``synth_overrides`` is an
+        optional mapping (e.g. a yaml ``synth`` node) whose sub-blocks — corpus / render /
+        effects / neighbors / paper / output — patch the config (used for stage-2)."""
         def _t(x):
             return (str(x),) if isinstance(x, (str, Path)) else tuple(str(p) for p in x)
         corpus = dict(ru_text_dirs=_t(ru_text_dirs), en_text_dirs=_t(en_text_dirs),
@@ -75,6 +92,8 @@ class HandwrittenLineGenerator:
         cfg = SynthConfig(corpus=CorpusConfig(**corpus),
                           font=FontConfig(ru_font_dirs=_t(ru_font_dirs), en_font_dirs=_t(en_font_dirs)),
                           **cfg_kwargs)
+        if synth_overrides is not None:
+            cfg = _apply_overrides(cfg, synth_overrides)
         return cls(cfg)
 
     def difficulty(self, step: int) -> float:
@@ -101,7 +120,10 @@ class HandwrittenLineGenerator:
 
     def _try_once(self, rng, t):
         text, lang = self.sampler.sample(rng, t)
-        entry = self.fonts.sample(rng, lang)
+        # a code-switched RU line carries Latin -> require a font that covers it (else it gets
+        # filtered away). Pure RU/EN lines pass require=None -> stage-1 behaviour is unchanged.
+        need = {c for c in text if c.isascii() and c.isalpha()} if lang == "ru" else None
+        entry = self.fonts.sample(rng, lang, require=need or None)
         text = _WS.sub(" ", entry.filter(_WS.sub(" ", text))).strip()
         if len(text) < 1:
             return None
@@ -115,9 +137,54 @@ class HandwrittenLineGenerator:
         paper = self.paper.make((ink.width + 2 * mw, ink.height + 2 * mh), rng, t)
         ox = mw + int(uniform(rng, (-0.4, 0.4)) * mw)
         oy = mh + int(uniform(rng, (-0.4, 0.4)) * mh)
+        ncfg = self.cfg.neighbors
+        if ncfg.p_neighbor > 0 and chance(rng, scale_p(ncfg.p_neighbor, t)):
+            paper = self._add_neighbors(paper, max(0, oy), ink.height, rng, t)
         rgb = self.compositor.blend(paper, ink, (max(0, ox), max(0, oy)), rng, t)
         img = Image.fromarray(self.effects(np.asarray(rgb), rng, t))
         return (img, text) if img.height >= self.cfg.output.min_height_px else None
+
+    def _neighbor_ink(self, rng, t):
+        """Render a distractor line (independent text + font); returns an RGBA ink crop."""
+        cfg = self.cfg.neighbors
+        text, lang = self.sampler.sample(rng, t)
+        entry = self.fonts.sample(rng, lang)
+        text = _WS.sub(" ", entry.filter(_WS.sub(" ", text))).strip()[: cfg.max_chars].strip()
+        if len(text) < 1:
+            return None
+        font = self.fonts.get(entry, randint(rng, self.cfg.font.sizes_px))
+        nink, meta = self.renderer.render(text, font, rng, t)
+        if meta.get("empty") or nink.width < 2 or nink.height < 2:
+            return None
+        return nink
+
+    def _add_neighbors(self, paper, oy, ink_h, rng, t):
+        """Composite a sliver of a neighbour line into the top and/or bottom margin, so it
+        bleeds in from the cropped edge without touching the main text (label unchanged)."""
+        cfg = self.cfg.neighbors
+        base = paper.convert("RGBA")
+        W, H = base.size
+        sides = (["top", "bottom"] if chance(rng, cfg.p_both_sides)
+                 else (["top"] if rng.random() < 0.5 else ["bottom"]))
+        for side in sides:
+            nink = self._neighbor_ink(rng, t)
+            if nink is None:
+                continue
+            vis = uniform(rng, cfg.visible_frac)
+            if side == "top":                                   # show the neighbour's bottom edge
+                budget = max(2, oy - 2)
+                vpx = min(max(2, int(vis * nink.height)), budget)
+                crop, y = nink.crop((0, nink.height - vpx, nink.width, nink.height)), 0
+            else:                                               # show the neighbour's top edge
+                budget = max(2, H - (oy + ink_h) - 2)
+                vpx = min(max(2, int(vis * nink.height)), budget)
+                crop, y = nink.crop((0, 0, nink.width, vpx)), H - vpx
+            if crop.width > W:                                  # random horizontal window
+                x0 = int(rng.integers(0, crop.width - W + 1))
+                crop = crop.crop((x0, 0, x0 + W, crop.height))
+            x = int(rng.integers(0, max(1, W - crop.width + 1)))
+            base.alpha_composite(crop, (x, max(0, y)))
+        return base.convert("RGB")
 
     def _fallback(self, rng):
         lang = "ru" if self.fonts.n("ru") else "en"

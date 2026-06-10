@@ -41,7 +41,9 @@ def main(config_path, resume):
         ru_text_weights=list(cfg.data.get("ru_text_weights", [])),
         en_text_weights=list(cfg.data.get("en_text_weights", [])),
         p_ru=cfg.data.p_ru, len_chars=tuple(cfg.data.len_chars), p_hyphenate=cfg.data.p_hyphenate,
-        warmup_steps=cfg.synth.warmup_steps, seed=cfg.synth.seed)
+        warmup_steps=cfg.synth.warmup_steps, seed=cfg.synth.seed,
+        curriculum=bool(cfg.synth.get("curriculum", True)),
+        synth_overrides=cfg.synth)            # stage-2 sub-blocks (corpus/render/effects/neighbors); no-op for stage-1
     print('gen ready')
 
     train_loader, val_loader, step_counter = build_dataloaders(gen, processor, cfg)

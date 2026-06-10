@@ -22,12 +22,26 @@ def main():
     ap.add_argument("--max-w", type=int, default=1100)
     ap.add_argument("--out", type=Path, default=ROOT / "assets" / "synth_preview.png")
     ap.add_argument("--bench", type=int, default=80)
+    ap.add_argument("--stage2", action="store_true",
+                    help="preview the stage-2 augmentations (curved baseline, shadows, "
+                         "code-switch, neighbour bleed)")
     args = ap.parse_args()
+
+    overrides = None
+    if args.stage2:
+        overrides = {
+            "corpus": {"p_code_switch": 0.6},
+            "render": {"p_curved_baseline": 0.6},
+            "effects": {"p_drop_shadow": 0.5, "p_cast_shadow": 0.4},
+            "neighbors": {"p_neighbor": 0.9, "p_both_sides": 0.5},
+            "output": {"margin_frac": [0.35, 0.6]},
+        }
 
     gen = HandwrittenLineGenerator.from_dirs(
         ru_text_dirs=[], en_text_dirs=[],
         ru_font_dirs=str(ROOT / "assets" / "fonts_ru"),
-        en_font_dirs=str(ROOT / "assets" / "fonts_en"))
+        en_font_dirs=str(ROOT / "assets" / "fonts_en"),
+        synth_overrides=overrides)
     print(f"fonts ru={gen.fonts.n('ru')} en={gen.fonts.n('en')} | effects {gen.effects.backend}\n")
 
     Hd, gap = args.disp_h, 8

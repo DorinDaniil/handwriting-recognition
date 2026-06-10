@@ -34,11 +34,13 @@ def _open_font(path: str, size: int) -> ImageFont.FreeTypeFont:
 class FontBank:
     def __init__(self, cfg: FontConfig, ru_charset: str, en_charset: str):
         self.cfg = cfg
-        self.pools = {"ru": self._build(cfg.ru_font_dirs, ru_charset, "ru"),
-                      "en": self._build(cfg.en_font_dirs, en_charset, "en")}
+        # ``extra`` = the OTHER language's charset: recorded into ``covered`` so code-switched
+        # glyphs survive filtering, but NOT into ``coverage`` -> pool membership is unchanged.
+        self.pools = {"ru": self._build(cfg.ru_font_dirs, ru_charset, "ru", en_charset),
+                      "en": self._build(cfg.en_font_dirs, en_charset, "en", ru_charset)}
 
-    def _build(self, dirs, charset, lang):
-        cov = load_or_build_coverage(dirs, charset)
+    def _build(self, dirs, charset, lang, extra_charset=""):
+        cov = load_or_build_coverage(dirs, charset, extra_charset)
         entries = [FontEntry(p, float(i["coverage"]), frozenset(i["covered"]))
                    for p, i in cov.items() if i["coverage"] >= self.cfg.min_glyph_coverage]
         if not entries:
@@ -55,9 +57,15 @@ class FontBank:
     def n(self, lang: str) -> int:
         return len(self.pools[lang][0])
 
-    def sample(self, rng, lang: str) -> FontEntry:
+    def sample(self, rng, lang: str, require=None) -> FontEntry:
         import numpy as np
         entries, weights = self.pools[lang]
+        if require:                              # keep only fonts covering the required glyphs
+            req = frozenset(require)
+            keep = [i for i, e in enumerate(entries) if req <= e.covered]
+            if keep:                             # fall back to the full pool if none qualify
+                entries = [entries[i] for i in keep]
+                weights = [weights[i] for i in keep] if weights is not None else None
         if weights is None:
             return entries[int(rng.integers(0, len(entries)))]
         w = np.asarray(weights, dtype=np.float64)

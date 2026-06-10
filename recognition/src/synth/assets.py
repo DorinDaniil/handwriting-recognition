@@ -75,11 +75,17 @@ def _file_key(path: Path) -> str:
     return f"{int(st.st_mtime)}:{st.st_size}"
 
 
-def load_or_build_coverage(font_dirs, charset: str, refresh: bool = False) -> dict[str, dict]:
-    """Return {path: {coverage, covered}} for fonts, cached per (file, charset)."""
+def load_or_build_coverage(font_dirs, charset: str, extra_charset: str = "",
+                           refresh: bool = False) -> dict[str, dict]:
+    """Return {path: {coverage, covered}} for fonts, cached per (file, charset).
+
+    ``coverage`` is measured over ``charset`` (drives the threshold and pool). ``covered``
+    is the glyphs the font renders across ``charset`` + ``extra_charset`` — passing the other
+    language as ``extra_charset`` lets code-switched insertions (e.g. Latin in a RU font)
+    survive glyph filtering, without changing ``coverage`` or pool membership."""
     files = scan_font_files(font_dirs)
-    chash = hashlib.md5(charset.encode("utf-8")).hexdigest()[:12]
-    active = set(charset)
+    chash = hashlib.md5((charset + "||" + extra_charset).encode("utf-8")).hexdigest()[:12]
+    active, probe = set(charset), set(charset) | set(extra_charset)
     cache = Path(tempfile.gettempdir()) / "synth_fonts"   # writable; fonts dir may be read-only
     cache.mkdir(parents=True, exist_ok=True)
     dkey = hashlib.md5("|".join(sorted(map(str, font_dirs))).encode()).hexdigest()[:16]
@@ -100,9 +106,9 @@ def load_or_build_coverage(font_dirs, charset: str, refresh: bool = False) -> di
         key, fkey = str(path), _file_key(path)
         entry = cache["fonts"].get(key)
         if entry is None or entry.get("fkey") != fkey:
-            covered = font_charset(path) & active
-            entry = {"fkey": fkey, "coverage": len(covered) / max(1, len(active)),
-                     "covered": "".join(sorted(covered))}
+            glyphs = font_charset(path)
+            entry = {"fkey": fkey, "coverage": len(glyphs & active) / max(1, len(active)),
+                     "covered": "".join(sorted(glyphs & probe))}
             cache["fonts"][key] = entry; dirty = True
         result[key] = {"coverage": entry["coverage"], "covered": entry["covered"]}
 

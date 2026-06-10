@@ -8,7 +8,7 @@ import numpy as np
 from PIL import Image, ImageFilter
 
 from .config import EffectsConfig
-from .rng import chance, scale_p, uniform
+from .rng import chance, randint, scale_p, uniform
 
 try:
     import albumentations as A
@@ -33,6 +33,14 @@ class Compositor:
         bleed = uniform(rng, cfg.ink_bleed_px)
         if bleed > 0.05:
             ink = ink.filter(ImageFilter.GaussianBlur(bleed))
+        if cfg.p_drop_shadow > 0 and chance(rng, scale_p(cfg.p_drop_shadow, t)):
+            blur = uniform(rng, cfg.shadow_blur_px)
+            sf = uniform(rng, cfg.shadow_alpha)
+            sa = ink.split()[3].filter(ImageFilter.GaussianBlur(blur)).point(lambda v: int(v * sf))
+            shadow = Image.new("RGBA", ink.size, (0, 0, 0, 0))
+            shadow.putalpha(sa)
+            dx, dy = randint(rng, cfg.shadow_offset_px), randint(rng, cfg.shadow_offset_px)
+            base.alpha_composite(shadow, (max(0, int(offset[0]) + dx), max(0, int(offset[1]) + dy)))
         if chance(rng, scale_p(cfg.p_show_through, t)):
             ghost = ink.transpose(Image.FLIP_LEFT_RIGHT).filter(ImageFilter.GaussianBlur(1.2))
             g = np.asarray(ghost).astype(np.float32); g[:, :, 3] *= 0.08
@@ -51,7 +59,10 @@ class EffectsPipeline:
             self._photo = self._build_photo()
 
     def __call__(self, img: np.ndarray, rng, t: float = 1.0) -> np.ndarray:
-        return self._photometric(self._geometry(img, rng, t), rng, t)
+        img = self._photometric(self._geometry(img, rng, t), rng, t)
+        if self.cfg.p_cast_shadow > 0 and chance(rng, scale_p(self.cfg.p_cast_shadow, t)):
+            img = self._cast_shadow(img, rng, uniform(rng, self.cfg.cast_shadow_strength))
+        return img
 
     # geometry (line slant is in the renderer; here only paper-preserving warps)
 
@@ -142,6 +153,20 @@ class EffectsPipeline:
               * np.arange(w) / max(1, w) + rng.uniform(0, 2 * math.pi))).astype(int)
         rows = np.clip(np.arange(h)[:, None] + dy[None, :], 0, h - 1)
         return img[rows, np.broadcast_to(np.arange(w), (h, w))]
+
+    @staticmethod
+    def _cast_shadow(img, rng, strength):
+        """Large soft shadow over part of the frame (hand / page fold): darken one side
+        of a random soft-edged line."""
+        h, w = img.shape[:2]
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        ang = float(rng.uniform(0, 2 * math.pi))
+        d = (xx / w - rng.uniform(0.2, 0.8)) * math.cos(ang) + \
+            (yy / h - rng.uniform(0.2, 0.8)) * math.sin(ang)
+        soft = float(rng.uniform(0.05, 0.25))
+        mask = 1.0 / (1.0 + np.exp(-d / soft))             # soft 0..1 step across the line
+        mult = 1.0 - strength * mask
+        return np.clip(img.astype(np.float32) * mult[:, :, None], 0, 255).astype(np.uint8)
 
     @staticmethod
     def _illumination(img, rng):

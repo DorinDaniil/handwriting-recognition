@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from .config import RenderConfig
-from .rng import chance, eased_centered, eased_uniform, lerp, uniform
+from .rng import chance, eased_centered, eased_uniform, lerp, scale_p, uniform
 
 
 class LineRenderer:
@@ -35,11 +35,24 @@ class LineRenderer:
             advances.append(a)
             jit.append(1.0 + eased_centered(rng, cfg.spacing_jitter, t))
         total_w = int(sum(a * j for a, j in zip(advances, jit))) + 2 * pad + glyph_h
-        canvas_h = int(glyph_h * 1.6 + 2 * pad + wob_max)
-        baseline_y = int(pad + ascent + 0.3 * glyph_h)
+
+        # optional low-frequency baseline curvature (stage-2); drawn only when enabled so
+        # stage-1's RNG stream is untouched.
+        curve = None
+        if cfg.p_curved_baseline > 0 and chance(rng, scale_p(cfg.p_curved_baseline, t)):
+            arc = eased_centered(rng, (-cfg.baseline_arc_px[1], cfg.baseline_arc_px[1]), t)
+            wave = eased_uniform(rng, cfg.baseline_wave_px, t)
+            curve = self._curve(total_w, arc, wave, cfg.baseline_wave_harmonics, rng)
+
+        head = 0.0 if curve is None else float(max(0.0, -curve.min()))   # room for upward bend
+        tail = wob_max if curve is None else wob_max + float(abs(curve).max())
+        canvas_h = int(glyph_h * 1.6 + 2 * pad + tail + head)
+        baseline_y = int(pad + ascent + 0.3 * glyph_h + head)
 
         canvas = Image.new("RGBA", (max(1, total_w), max(1, canvas_h)), (0, 0, 0, 0))
         wob = self._wobble(total_w, eased_uniform(rng, cfg.baseline_wobble_px, t), rng)
+        if curve is not None:
+            wob = wob + curve
 
         x = float(pad)
         for ch, adv, j in zip(text, advances, jit):
@@ -80,6 +93,19 @@ class LineRenderer:
         ImageDraw.Draw(tile).text((pad, pad + ascent), ch, font=font,
                                   fill=(ink[0], ink[1], ink[2], 255), anchor="ls")
         return tile, float(pad + ascent)
+
+    @staticmethod
+    def _curve(width, arc_px, wave_amp, n_harm, rng):
+        """Per-column baseline offset: a parabola (arc) plus a few sine harmonics,
+        mean-centred so the line keeps its vertical position."""
+        if width < 2:
+            return np.zeros(max(1, width), dtype=np.float32)
+        x = np.arange(width, dtype=np.float32) / (width - 1)
+        y = arc_px * (2.0 * x - 1.0) ** 2                       # 0 at centre, |arc| at the ends
+        for _ in range(max(1, int(n_harm))):
+            y = y + (wave_amp / max(1, int(n_harm))) * np.sin(
+                2 * math.pi * rng.uniform(0.5, 2.0) * x + rng.uniform(0, 2 * math.pi))
+        return (y - y.mean()).astype(np.float32)
 
     @staticmethod
     def _wobble(width, amp, rng):
