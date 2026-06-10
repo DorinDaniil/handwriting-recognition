@@ -5,20 +5,20 @@
 model:
   pretrained: microsoft/trocr-small-handwritten
   tokenizer: assets/tokenizer_bi    # English + RU tokens (scripts/train_tokenizer.py); if missing -> english only
-  max_target_len: 128       # длина меток/генерации в токенах; под len_chars до ~100 символов
+  max_target_len: 128
 
 data:
-  ru_text_dirs: [/mnt/DATA2/dorin/handwriting-recognition/data/ru_texts]
-  en_text_dirs: [/mnt/DATA2/dorin/handwriting-recognition/data/en_texts]
-  ru_text_weights: []        # вес каждой ru-папки (длина == ru_text_dirs); [] = по числу файлов
+  ru_text_dirs: ['/mnt/DATA2/varlamova/HTR/trocr/data/texts/school', '/mnt/DATA2/varlamova/HTR/trocr/data/texts/general']
+  en_text_dirs: ['/mnt/DATA2/varlamova/HTR/trocr/data/texts/english']
+  ru_text_weights: [0.7, 0.3]        # вес каждой ru-папки (длина == ru_text_dirs); [] = по числу файлов
   en_text_weights: []
-  ru_font_dirs: [assets/fonts_ru]
-  en_font_dirs: [assets/fonts_en]
-  p_ru: 0.5                  # share of Russian lines (rest English)
-  batch_size: 16             # pixel_values на батч ~ batch*3*384*384*4 байт (~113МБ при 16); снижай при нехватке RAM
-  num_workers: 4             # очередь префетча ~ num_workers*2 батчей в RAM; меньше воркеров = меньше памяти
-  val_samples: 500           # синтетический val (ленивый, в RAM не копится); потом замени на реальные строки
-  len_chars: [8, 50]
+  ru_font_dirs: ['/mnt/DATA2/dorin/handwriting-recognition/recognition/assets/fonts_ru']
+  en_font_dirs: ['/mnt/DATA2/dorin/handwriting-recognition/recognition/assets/fonts_en']
+  p_ru: 0.7                  # share of Russian lines (rest English)
+  batch_size: 128
+  num_workers: 8
+  val_samples: 500           # fixed synthetic val (mix EN+RU); replace with real lines later
+  len_chars: [8, 100]
   p_hyphenate: 0.15
 
 synth:
@@ -26,8 +26,8 @@ synth:
   seed: 42
 
 trainer:
-  max_steps: 60000
-  lr: 5.0e-5
+  max_steps: 100000
+  lr: 1.0e-4
   weight_decay: 0.01
   warmup_steps: 2000         # LR warmup
   freeze_encoder_steps: 2000 # phase 1: warm up the new RU token embeddings/head
@@ -36,6 +36,6 @@ trainer:
   num_beams: 1
   log_every: 50
   eval_every: 2000
-  output_dir: outputs/trocr_small_bi_pretrain
+  output_dir: 'outputs/trocr_small_bi_pretrain'
 
 device: cuda

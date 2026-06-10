@@ -38,20 +38,24 @@ img, text = gen.sample(make_generator(42, 0, 0), step=10000)   # (PIL RGB, ко�
 только реальный текст. `sample()` -> тугой кроп на бумаге (`output.min_side`=224, без белых
 полей); квадрат под TrOCR -> `fit_to_square(img, 384)`.
 
-## Токенайзер (EN уже есть, добавляем RU)
-Стандарт — **расширение словаря**: к английскому токенайзеру TrOCR добавляем русские токены
-(`scripts/train_tokenizer.py`), затем `resize_token_embeddings` сохраняет английские строки
-и добавляет новые под русские токены (английский не теряется).
+## Токенайзер (двуязычный)
+Дописывание русских токенов в английский byte-level BPE через `add_tokens` ломает
+восстановление пробелов (RU декодится с лишними пробелами внутри слов). Поэтому обучаем
+**новый byte-level BPE на твоём EN+RU корпусе** (`train_new_from_iterator`) — round-trip
+корректный для обоих языков, русский компактный. Эмбеддинги декодера переинициализируются
+(энкодер и слои декодера остаются претренированными).
 ```
-python scripts/train_tokenizer.py --ru-text-dirs /data/ru_texts --add-words 4000   # -> assets/tokenizer_bi
+python scripts/train_tokenizer.py --ru-text-dirs /data/ru1 /data/ru2 --en-text-dirs /data/en --vocab-size 12000
+# -> assets/tokenizer_bi ; в конце печатает round-trip проверку (должно совпасть)
 ```
+Без своего токенайзера (`model.tokenizer: null`) берётся английский byte-BPE: корректно, но RU ~2 токена/символ.
 
 ## Обучение (pretrain на синтетике)
 ```
 python scripts/run_pretrain.py --config configs/pretrain_small.yaml
 python scripts/run_pretrain.py --resume
 ```
-Фаза 1: энкодер заморожен (`freeze_encoder_steps`) — дообучаются новые русские эмбеддинги/голова;
+Фаза 1: энкодер заморожен (`freeze_encoder_steps`) — догоняют переинициализированные эмбеддинги/голова;
 фаза 2: всё размораживается. Чекпойнты `outputs/.../best` (по CER) и `last.pt` (resume).
 
 ## Структура

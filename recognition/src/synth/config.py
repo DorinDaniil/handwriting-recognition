@@ -26,7 +26,7 @@ class CorpusConfig:
     en_text_weights: tuple[float, ...] = ()
     glob: str = "*.txt"
     cache_dir: str | None = None             # file-list manifest cache (delete to rescan)
-    p_ru: float = 0.5                        # share of Russian lines
+    p_ru: float = 0.7                        # share of Russian lines
     len_chars: tuple[int, int] = (8, 50)
     p_hyphenate: float = 0.15                # end a line mid-word with '-'
     lowercase_prob: float = 0.0
@@ -112,7 +112,7 @@ class EffectsConfig:
 
 @dataclass
 class OutputConfig:
-    min_side: int = 224                      # shorter side after resize; aspect kept
+    min_side: int = 384                      # shorter side after resize; aspect kept
     max_side: int | None = None
     margin_frac: tuple[float, float] = (0.10, 0.28)   # paper around text (room for geometry, no text crop)
     min_height_px: int = 24

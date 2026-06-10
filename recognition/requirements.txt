@@ -1,15 +1,13 @@
-# Synthetic-data generator (Tier 1) — core
 pillow>=10.0
 numpy
-fonttools                # exact glyph-coverage probing (cmap)
-albumentations>=1.4      # rich geometric/photometric degradations (falls back to numpy/PIL if absent)
-matplotlib               # notebooks / previews
+fonttools
+albumentations>=1.4
+matplotlib
 
-# TrOCR fine-tuning (next step — training wiring)
 torch>=2.1
 torchvision>=0.16
 transformers>=4.46
 sentencepiece
 jiwer                    # CER / WER
-omegaconf                # config + CLI dotlist overrides (matches the detection project)
+omegaconf
 tqdm
