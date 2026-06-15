@@ -24,17 +24,16 @@ def main():
     ap.add_argument("--bench", type=int, default=80)
     ap.add_argument("--stage2", action="store_true",
                     help="preview the stage-2 augmentations (curved baseline, shadows, "
-                         "code-switch, neighbour bleed)")
+                         "neighbour bleed)")
     args = ap.parse_args()
 
     overrides = None
     if args.stage2:
         overrides = {
-            "corpus": {"p_code_switch": 0.6},
             "render": {"p_curved_baseline": 0.6},
             "effects": {"p_drop_shadow": 0.5, "p_cast_shadow": 0.4},
-            "neighbors": {"p_neighbor": 0.9, "p_both_sides": 0.5},
-            "output": {"margin_frac": [0.35, 0.6]},
+            "neighbors": {"p_neighbor": 0.9, "p_both_sides": 0.4},
+            "output": {"margin_frac": [0.06, 0.18]},
         }
 
     gen = HandwrittenLineGenerator.from_dirs(

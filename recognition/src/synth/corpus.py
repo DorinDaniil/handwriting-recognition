@@ -29,11 +29,6 @@ _BUILTIN_EN = ("the of and to in a is that it was for on are as with they at be 
                "school teacher student lesson question answer number letter english text page line "
                "today weather good first nature friends house city book").split()
 
-# curated Latin tokens that realistically appear inside Russian handwriting
-# (brands / terms / acronyms). Used for stage-2 code-switching.
-_CODE_SWITCH = ("Wi-Fi IT PDF online email Python Google USB OK CEO URL Windows GPS SMS HR PR "
-                "Internet Word Excel YouTube iPhone Android API app web ok").split()
-
 _RU_CONF = {"о": "а", "а": "о", "е": "и", "и": "е", "я": "е", "э": "е", "ё": "е",
             "с": "з", "з": "с", "т": "д", "д": "т", "б": "п", "п": "б", "ж": "ш", "ш": "ж"}
 _EN_CONF = {"a": "e", "e": "a", "i": "e", "o": "a", "u": "a", "s": "z", "c": "s", "k": "c"}
@@ -144,9 +139,6 @@ class TextSampler:
         n = self._target_len(rng, t)
         s = self._real_line(rng, n, lang) if self._groups[lang] else self._builtin_line(rng, n, lang)
         s = _clean(s, cs) or self._builtin_line(rng, n, lang)
-        if lang == "ru" and self.cfg.p_code_switch > 0 and chance(rng, self.cfg.p_code_switch):
-            s = self._code_switch(s, rng)
-            cs = cs | self._sets["en"]            # let the inserted Latin survive cleaning
         s = self._apply_errors(s, lang, rng)
         s = _clean(s, cs)
         if self.cfg.lowercase_prob and chance(rng, self.cfg.lowercase_prob):
@@ -191,35 +183,6 @@ class TextSampler:
             out.append(w); total += len(w) + 1
         j = " ".join(out)
         return j[:n].rsplit(" ", 1)[0] if len(j) > n else j
-
-    def _code_switch(self, s, rng):
-        """Insert whole EN word(s) between RU words (never split a word)."""
-        words = [w for w in s.split(" ") if w]
-        if not words:
-            return s
-        k = randint(rng, (1, max(1, self.cfg.code_switch_max_tokens)))
-        for _ in range(k):
-            tok = ""
-            if self._groups["en"] and chance(rng, self.cfg.p_code_switch_corpus):
-                tok = self._en_token(rng)
-            if not tok:
-                tok = _CODE_SWITCH[int(rng.integers(0, len(_CODE_SWITCH)))]
-            tok = _clean(tok, self._sets["en"])
-            if not tok:
-                continue
-            pos = int(rng.integers(1, len(words) + 1)) if len(words) > 1 else len(words)
-            words.insert(pos, tok)
-        return " ".join(words)
-
-    def _en_token(self, rng):
-        """One or two whole words sampled from the EN corpus."""
-        raw = _read_flat(choice(rng, self._groups["en"], self._dir_w["en"]).pick(rng))
-        parts = [w for w in raw.split(" ") if w]
-        if not parts:
-            return ""
-        i = int(rng.integers(0, len(parts)))
-        n = 1 if rng.random() < 0.7 else 2
-        return " ".join(parts[i:i + n])
 
     def _apply_errors(self, s, lang, rng):
         c = self.cfg

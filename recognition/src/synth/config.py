@@ -26,7 +26,7 @@ class CorpusConfig:
     en_text_weights: tuple[float, ...] = ()
     glob: str = "*.txt"
     cache_dir: str | None = None             # file-list manifest cache (delete to rescan)
-    p_ru: float = 0.5                        # share of Russian lines
+    p_ru: float = 0.7                        # share of Russian lines
     len_chars: tuple[int, int] = (8, 50)
     p_hyphenate: float = 0.15                # end a line mid-word with '-'
     lowercase_prob: float = 0.0
@@ -35,11 +35,6 @@ class CorpusConfig:
     p_letter_sub: float = 0.06               # per-letter chance to swap a look/sound-alike (о->а, e->a)
     p_drop_punct: float = 0.35               # chance to drop one punctuation mark
     p_typo: float = 0.12                     # chance to double or drop one letter
-    # code-switch block (stage-2): insert whole EN word(s) into RU lines. The EN word
-    # is real text and goes into the label. 0 -> off (stage-1 untouched, draws no RNG).
-    p_code_switch: float = 0.0               # chance a RU line gets an EN insertion
-    p_code_switch_corpus: float = 0.3        # share of insertions drawn from the EN corpus vs curated list
-    code_switch_max_tokens: int = 3          # up to this many whole EN words inserted
 
 
 @dataclass
@@ -136,7 +131,7 @@ class NeighborConfig:
     0 -> off (stage-1 untouched, draws no RNG). Give it vertical room via output.margin_frac."""
     p_neighbor: float = 0.0                  # chance a line gets a neighbour sliver
     p_both_sides: float = 0.4                # given a neighbour, chance of both top and bottom
-    visible_frac: tuple[float, float] = (0.12, 0.40)   # fraction of the neighbour line height shown
+    visible_frac: tuple[float, float] = (0.08, 0.28)   # sliver thickness as a fraction of the MAIN line height
     max_chars: int = 40                      # cap neighbour length (it is only a sliver anyway)
 
 

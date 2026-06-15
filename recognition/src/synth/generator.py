@@ -120,10 +120,7 @@ class HandwrittenLineGenerator:
 
     def _try_once(self, rng, t):
         text, lang = self.sampler.sample(rng, t)
-        # a code-switched RU line carries Latin -> require a font that covers it (else it gets
-        # filtered away). Pure RU/EN lines pass require=None -> stage-1 behaviour is unchanged.
-        need = {c for c in text if c.isascii() and c.isalpha()} if lang == "ru" else None
-        entry = self.fonts.sample(rng, lang, require=need or None)
+        entry = self.fonts.sample(rng, lang)
         text = _WS.sub(" ", entry.filter(_WS.sub(" ", text))).strip()
         if len(text) < 1:
             return None
@@ -139,7 +136,7 @@ class HandwrittenLineGenerator:
         oy = mh + int(uniform(rng, (-0.4, 0.4)) * mh)
         ncfg = self.cfg.neighbors
         if ncfg.p_neighbor > 0 and chance(rng, scale_p(ncfg.p_neighbor, t)):
-            paper = self._add_neighbors(paper, max(0, oy), ink.height, rng, t)
+            paper, oy = self._add_neighbors(paper, max(0, oy), ink.height, rng, t)
         rgb = self.compositor.blend(paper, ink, (max(0, ox), max(0, oy)), rng, t)
         img = Image.fromarray(self.effects(np.asarray(rgb), rng, t))
         return (img, text) if img.height >= self.cfg.output.min_height_px else None
@@ -159,32 +156,48 @@ class HandwrittenLineGenerator:
         return nink
 
     def _add_neighbors(self, paper, oy, ink_h, rng, t):
-        """Composite a sliver of a neighbour line into the top and/or bottom margin, so it
-        bleeds in from the cropped edge without touching the main text (label unchanged)."""
+        """Grow the canvas just enough to host a thin sliver of a neighbour line hugging the
+        main text above and/or below (a small gap, as when a line detector crops slightly into
+        the next line). The added rows are filled by replicating the paper's edge so the
+        background stays continuous. Returns (paper, new_oy). The neighbour is a distractor:
+        the label is unchanged."""
         cfg = self.cfg.neighbors
-        base = paper.convert("RGBA")
-        W, H = base.size
-        sides = (["top", "bottom"] if chance(rng, cfg.p_both_sides)
-                 else (["top"] if rng.random() < 0.5 else ["bottom"]))
-        for side in sides:
+        W, H = paper.size
+
+        def _strip(side):
             nink = self._neighbor_ink(rng, t)
             if nink is None:
-                continue
-            vis = uniform(rng, cfg.visible_frac)
-            if side == "top":                                   # show the neighbour's bottom edge
-                budget = max(2, oy - 2)
-                vpx = min(max(2, int(vis * nink.height)), budget)
-                crop, y = nink.crop((0, nink.height - vpx, nink.width, nink.height)), 0
-            else:                                               # show the neighbour's top edge
-                budget = max(2, H - (oy + ink_h) - 2)
-                vpx = min(max(2, int(vis * nink.height)), budget)
-                crop, y = nink.crop((0, 0, nink.width, vpx)), H - vpx
+                return None
+            vpx = max(3, min(nink.height, int(uniform(rng, cfg.visible_frac) * ink_h)))
+            box = (0, nink.height - vpx, nink.width, nink.height) if side == "top" else (0, 0, nink.width, vpx)
+            crop = nink.crop(box)
             if crop.width > W:                                  # random horizontal window
                 x0 = int(rng.integers(0, crop.width - W + 1))
                 crop = crop.crop((x0, 0, x0 + W, crop.height))
+            return crop, randint(rng, (1, max(1, ink_h // 12)))   # (sliver, gap to the main text)
+
+        sides = (["top", "bottom"] if chance(rng, cfg.p_both_sides)
+                 else (["top"] if rng.random() < 0.5 else ["bottom"]))
+        strips = {s: v for s in sides if (v := _strip(s)) is not None}
+        if not strips:
+            return paper, oy
+
+        add_t = strips["top"][0].height + strips["top"][1] if "top" in strips else 0
+        add_b = strips["bottom"][0].height + strips["bottom"][1] if "bottom" in strips else 0
+        arr = np.asarray(paper.convert("RGB"))
+        parts = ([np.repeat(arr[:1], add_t, axis=0)] if add_t else []) + [arr] + \
+                ([np.repeat(arr[-1:], add_b, axis=0)] if add_b else [])
+        base = Image.fromarray(np.concatenate(parts, axis=0)).convert("RGBA")
+
+        if "top" in strips:                                     # sliver sits gap-px above the text
+            crop, _ = strips["top"]
             x = int(rng.integers(0, max(1, W - crop.width + 1)))
-            base.alpha_composite(crop, (x, max(0, y)))
-        return base.convert("RGB")
+            base.alpha_composite(crop, (x, 0))
+        if "bottom" in strips:                                  # ... and/or gap-px below it
+            crop, gap = strips["bottom"]
+            x = int(rng.integers(0, max(1, W - crop.width + 1)))
+            base.alpha_composite(crop, (x, base.height - crop.height))
+        return base.convert("RGB"), oy + add_t
 
     def _fallback(self, rng):
         lang = "ru" if self.fonts.n("ru") else "en"

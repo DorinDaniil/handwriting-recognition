@@ -1,0 +1,36 @@
+# Fine-tune the pretrained TrOCR-small on real handwriting.
+#   python scripts/run_finetune.py --config configs/finetune.yaml
+#   python scripts/run_finetune.py --resume
+
+model:
+  pretrained: outputs/trocr_small_bi_pretrain_stage2/best
+  tokenizer: assets/tokenizer_bi
+  max_target_len: 128
+
+data:
+  cyrillic_root: data/cyrillic
+  batch_size: 64
+  num_workers: 8
+  iam:
+    enabled: true
+    hf_id: Teklia/IAM-line
+    cache_dir: data/iam
+    image_key: image
+    text_key: text
+    train_split: train
+    test_split: test
+
+trainer:
+  max_steps: 20000
+  lr: 3.0e-5
+  weight_decay: 0.01
+  warmup_steps: 500
+  freeze_encoder_steps: 0
+  amp_dtype: bf16
+  grad_clip: 1.0
+  num_beams: 4
+  log_every: 50
+  eval_every: 1000
+  output_dir: outputs/trocr_small_bi_finetune
+
+device: cuda

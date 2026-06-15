@@ -1,7 +1,7 @@
 # Stage-2 pretrain: fine-tune the stage-1 checkpoint on HARDER synthetic lines —
-# curved baselines, shadows, code-switching (EN words inside RU), and neighbour-line
-# bleed (slivers of the line above/below creeping into the crop, which the model must
-# ignore).
+# curved baselines, shadows, and neighbour-line bleed (a thin sliver of the line above/
+# below creeping into a tight crop, which the model must learn to ignore). All of these
+# are off by default in the config, so stage-1 stays reproducible; switched on here.
 #
 #   python scripts/run_pretrain.py --config configs/pretrain_stage2.yaml
 #   python scripts/run_pretrain.py --config configs/pretrain_stage2.yaml --resume
@@ -14,14 +14,14 @@ model:
 data:
   ru_text_dirs: ['/mnt/DATA2/varlamova/HTR/trocr/data/texts/school', '/mnt/DATA2/varlamova/HTR/trocr/data/texts/general']
   en_text_dirs: ['/mnt/DATA2/varlamova/HTR/trocr/data/texts/english']
-  ru_text_weights: [0.7, 0.3]
+  ru_text_weights: [0.6, 0.4]
   en_text_weights: []
   ru_font_dirs: ['/mnt/DATA2/dorin/handwriting-recognition/recognition/assets/fonts_ru']
   en_font_dirs: ['/mnt/DATA2/dorin/handwriting-recognition/recognition/assets/fonts_en']
   p_ru: 0.5
   batch_size: 128
   num_workers: 8
-  val_samples: 500
+  val_samples: 1000
   len_chars: [8, 100]
   p_hyphenate: 0.15
 
@@ -31,16 +31,11 @@ synth:
   warmup_steps: 8000         # only used if curriculum re-enabled
 
   # --- stage-2 augmentations (everything below is off in stage-1) ---
-  corpus:
-    p_code_switch: 0.30        # 30% of RU lines get whole EN word(s) inserted (goes into the label)
-    p_code_switch_corpus: 0.3  # share drawn from EN corpus vs the curated brand/term list
-    code_switch_max_tokens: 2
-
   render:
     p_curved_baseline: 0.30    # arc + waviness of the handwriting line (paper stays straight)
     baseline_arc_px: [4.0, 16.0]
     baseline_wave_px: [2.0, 7.0]
-    baseline_wave_harmonics: 3
+    baseline_wave_harmonics: 2
 
   effects:
     p_drop_shadow: 0.10        # blurred offset shadow of the ink
@@ -49,16 +44,16 @@ synth:
     p_elastic: 0.25
 
   neighbors:
-    p_neighbor: 0.55           # bleed of adjacent lines into the top/bottom edge
-    p_both_sides: 0.40
-    visible_frac: [0.12, 0.40]
+    p_neighbor: 0.55           # bleed of an adjacent line, hugging the main text
+    p_both_sides: 0.35
+    visible_frac: [0.08, 0.28] # sliver thickness as a fraction of the main line height
     max_chars: 40
 
   output:
-    margin_frac: [0.30, 0.60]  # more top/bottom paper so neighbour slivers have room
+    margin_frac: [0.06, 0.18]  # tight crop, like a real line detector (little background)
 
 trainer:
-  max_steps: 60000
+  max_steps: 50000
   lr: 5.0e-5                  # lower LR for fine-tuning from a good checkpoint
   weight_decay: 0.01
   warmup_steps: 1000
