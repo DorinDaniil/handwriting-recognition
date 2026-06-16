@@ -12,14 +12,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+import torch
 from omegaconf import OmegaConf
-from torch.utils.data import ConcatDataset, DataLoader
+from torch.utils.data import ConcatDataset, DataLoader, WeightedRandomSampler
 from transformers import AutoTokenizer
 
 from src.data import TrOCRCollator
 from src.finetune import Augmenter, HFLineDataset, TsvLineDataset, ensure_cyrillic, load_iam
+from src.finetune.trainer import train
 from src.model import build_processor, build_trocr_small
-from src.train import train_model
 
 
 def _resolve(path):
@@ -27,22 +28,14 @@ def _resolve(path):
     return str(local) if local.exists() else str(path)
 
 
-def infinite(loader):
-    while True:
-        yield from loader
-
-
-def build_datasets(cfg, train_aug, eval_aug):
-    cyr = ensure_cyrillic(_resolve(cfg.data.cyrillic_root))
-    train_sets = [TsvLineDataset(cyr.train_tsv, cyr.root, "train", train_aug)]
-    val_sets = [TsvLineDataset(cyr.test_tsv, cyr.root, "test", eval_aug)] if cyr.test_tsv else []
-
-    iam = load_iam(cfg.data.get("iam"))
-    if iam is not None:
-        train_sets.append(HFLineDataset(iam.train, iam.image_key, iam.text_key, train_aug))
-        if iam.test is not None:
-            val_sets.append(HFLineDataset(iam.test, iam.image_key, iam.text_key, eval_aug))
-    return ConcatDataset(train_sets), ConcatDataset(val_sets)
+def en_ratio_sampler(parts, en_ratio):
+    sizes = [len(d) for _, d in parts]
+    n_ru = sum(1 for lang, _ in parts if lang != "en")
+    targets = [en_ratio if lang == "en" else (1.0 - en_ratio) / n_ru for lang, _ in parts]
+    weights = []
+    for (_, dataset), target in zip(parts, targets):
+        weights += [target / len(dataset)] * len(dataset)
+    return WeightedRandomSampler(weights, num_samples=sum(sizes), replacement=True)
 
 
 def main(config_path, resume):
@@ -57,18 +50,36 @@ def main(config_path, resume):
     print(report.summary())
     processor = build_processor(tokenizer, pretrained)
 
-    train_set, val_set = build_datasets(cfg, Augmenter(train=True), Augmenter(train=False))
-    print(f"train {len(train_set)} lines | val {len(val_set)} lines")
+    train_aug, eval_aug = Augmenter(train=True), Augmenter(train=False)
+    cyr = ensure_cyrillic(ROOT / cfg.data.cyrillic_root)
+    iam = load_iam(cfg.data.get("iam"))
+
+    parts = [("ru", TsvLineDataset(cyr.train_tsv, cyr.root, "train", train_aug))]
+    if iam is not None:
+        parts.append(("en", HFLineDataset(iam.train, iam.image_key, iam.text_key, train_aug)))
+    print("train:", {lang: len(d) for lang, d in parts})
 
     collate = TrOCRCollator(processor, cfg.model.max_target_len)
     nw = cfg.data.num_workers
-    train_loader = DataLoader(train_set, batch_size=cfg.data.batch_size, shuffle=True,
-                              num_workers=nw, collate_fn=collate, pin_memory=True,
-                              persistent_workers=nw > 0, drop_last=True)
-    val_loader = DataLoader(val_set, batch_size=max(1, cfg.data.batch_size // 2),
-                            num_workers=min(2, nw), collate_fn=collate)
+    en_ratio = cfg.data.get("en_ratio")
+    use_sampler = en_ratio is not None and len(parts) > 1
+    sampler = en_ratio_sampler(parts, float(en_ratio)) if use_sampler else None
+    train_loader = DataLoader(ConcatDataset([d for _, d in parts]), batch_size=cfg.data.batch_size,
+                              shuffle=sampler is None, sampler=sampler, num_workers=nw,
+                              collate_fn=collate, pin_memory=True, persistent_workers=nw > 0,
+                              drop_last=True)
 
-    train_model(model, processor, infinite(train_loader), val_loader, cfg, resume=resume)
+    bs, vnw = max(1, cfg.data.batch_size // 2), min(2, nw)
+    val_loaders = {}
+    if cyr.test_tsv:
+        val_loaders["ru"] = DataLoader(TsvLineDataset(cyr.test_tsv, cyr.root, "test", eval_aug),
+                                       batch_size=bs, num_workers=vnw, collate_fn=collate)
+    if iam is not None and iam.test is not None:
+        val_loaders["en"] = DataLoader(HFLineDataset(iam.test, iam.image_key, iam.text_key, eval_aug),
+                                       batch_size=bs, num_workers=vnw, collate_fn=collate)
+
+    device = torch.device(cfg.get("device", "cuda") if torch.cuda.is_available() else "cpu")
+    train(model, processor, train_loader, val_loaders, cfg, device, resume=resume)
 
 
 if __name__ == "__main__":
