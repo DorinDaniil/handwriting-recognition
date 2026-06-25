@@ -8,21 +8,67 @@ model:
   max_target_len: 128
 
 data:
-  cyrillic_root: data/cyrillic
-  batch_size: 64
+  batch_size: 96
   num_workers: 8
-  en_ratio: 0.2              # share of English per batch (null -> natural proportion ~8%)
-  iam:
-    enabled: true
-    hf_id: Teklia/IAM-line
-    cache_dir: data/iam
-    image_key: image
-    text_key: text
-    train_split: train
-    test_split: test
+  en_ratio: null              # share of English per batch (null -> natural proportion by size)
+  # aug_prob: 0.7             # chance to augment a train image (1-aug_prob -> clean image)
+  aug_prob: 0.3
+
+  # Toggle each source with `enabled`. lang (ru/en) drives en_ratio balancing and per-language eval.
+  sources:
+    cyrillic:
+      enabled: true
+      kind: cyrillic
+      lang: ru
+      root: data/cyrillic
+
+    school_notebooks_ru:
+      enabled: true
+      kind: tsv
+      lang: ru
+      root: data/school_notebooks_ru
+      train_glob: train.tsv
+      test_glob: test.tsv
+
+    iam:
+      enabled: true
+      kind: iam
+      lang: en
+      hf_id: Teklia/IAM-line
+      cache_dir: data/iam
+      image_key: image
+      text_key: text
+      train_split: train
+      test_split: test
+
+    cvl:
+      enabled: true
+      kind: tsv
+      lang: en
+      root: data/cvl
+      train_glob: "**/cvl_train.tsv"
+
+    school_notebooks_en:
+      enabled: true
+      kind: tsv
+      lang: en
+      root: data/school_notebooks_en
+      train_glob: train.tsv
+      test_glob: test.tsv
+
+    hwr200:
+      enabled: true
+      kind: pairs
+      lang: ru
+      # images: /mnt/DATA2/varlamova/HTR/trocr/data/texts/hwr200/filtered_lines/lines
+      # texts: /mnt/DATA2/varlamova/HTR/trocr/data/texts/hwr200/filtered_lines/lines_txt
+      images: /mnt/DATA2/varlamova/HTR/trocr/data/texts/hwr200/filtered_lines_v2//lines
+      texts: /mnt/DATA2/varlamova/HTR/trocr/data/texts/hwr200/filtered_lines_v2/lines_txt
+      test_frac: 0.1
+      seed: 42
 
 trainer:
-  num_epochs: 20
+  num_epochs: 16
   lr: 3.0e-5
   weight_decay: 0.01
   warmup_steps: 500
@@ -31,6 +77,6 @@ trainer:
   num_beams: 4
   log_every: 50
   select_metric: nes_char    # best model = max harmonic mean of this metric over ru/en
-  output_dir: outputs/trocr_small_bi_finetune_updated
+  output_dir: outputs/trocr_small_bi_finetune_with_hwr200
 
 device: cuda

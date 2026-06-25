@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Fine-tune the pretrained bilingual TrOCR-small on real handwriting
-(Cyrillic Kaggle dataset + IAM English).
+"""Fine-tune the pretrained bilingual TrOCR-small on real handwriting.
+
+Data sources (Cyrillic / IAM / CVL / School Notebooks ...) are selected and configured
+under `data.sources` in the config — toggle each with `enabled`.
 
     python scripts/run_finetune.py --config configs/finetune.yaml
     python scripts/run_finetune.py --resume
 """
 import argparse
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +21,7 @@ from torch.utils.data import ConcatDataset, DataLoader, WeightedRandomSampler
 from transformers import AutoTokenizer
 
 from src.data import TrOCRCollator
-from src.finetune import Augmenter, HFLineDataset, TsvLineDataset, ensure_cyrillic, load_iam
+from src.finetune import Augmenter, build_sources
 from src.finetune.trainer import train
 from src.model import build_processor, build_trocr_small
 
@@ -28,14 +31,14 @@ def _resolve(path):
     return str(local) if local.exists() else str(path)
 
 
-def en_ratio_sampler(parts, en_ratio):
-    sizes = [len(d) for _, d in parts]
-    n_ru = sum(1 for lang, _ in parts if lang != "en")
-    targets = [en_ratio if lang == "en" else (1.0 - en_ratio) / n_ru for lang, _ in parts]
+def lang_ratio_sampler(sources, en_ratio):
+    totals = {"en": sum(len(s.train) for s in sources if s.lang == "en"),
+              "ru": sum(len(s.train) for s in sources if s.lang != "en")}
     weights = []
-    for (_, dataset), target in zip(parts, targets):
-        weights += [target / len(dataset)] * len(dataset)
-    return WeightedRandomSampler(weights, num_samples=sum(sizes), replacement=True)
+    for s in sources:
+        share = en_ratio if s.lang == "en" else 1.0 - en_ratio
+        weights += [share / max(1, totals["en" if s.lang == "en" else "ru"])] * len(s.train)
+    return WeightedRandomSampler(weights, num_samples=sum(len(s.train) for s in sources), replacement=True)
 
 
 def main(config_path, resume):
@@ -50,33 +53,28 @@ def main(config_path, resume):
     print(report.summary())
     processor = build_processor(tokenizer, pretrained)
 
-    train_aug, eval_aug = Augmenter(train=True), Augmenter(train=False)
-    cyr = ensure_cyrillic(ROOT / cfg.data.cyrillic_root)
-    iam = load_iam(cfg.data.get("iam"))
-
-    parts = [("ru", TsvLineDataset(cyr.train_tsv, cyr.root, "train", train_aug))]
-    if iam is not None:
-        parts.append(("en", HFLineDataset(iam.train, iam.image_key, iam.text_key, train_aug)))
-    print("train:", {lang: len(d) for lang, d in parts})
+    sources = build_sources(cfg.data.sources, ROOT, Augmenter(train=True), Augmenter(train=False))
+    if not sources:
+        raise SystemExit("no enabled data sources")
 
     collate = TrOCRCollator(processor, cfg.model.max_target_len)
     nw = cfg.data.num_workers
+    train_set = ConcatDataset([s.train for s in sources])
     en_ratio = cfg.data.get("en_ratio")
-    use_sampler = en_ratio is not None and len(parts) > 1
-    sampler = en_ratio_sampler(parts, float(en_ratio)) if use_sampler else None
-    train_loader = DataLoader(ConcatDataset([d for _, d in parts]), batch_size=cfg.data.batch_size,
-                              shuffle=sampler is None, sampler=sampler, num_workers=nw,
-                              collate_fn=collate, pin_memory=True, persistent_workers=nw > 0,
-                              drop_last=True)
+    langs = {s.lang for s in sources}
+    use_sampler = en_ratio is not None and "en" in langs and "ru" in langs
+    sampler = lang_ratio_sampler(sources, float(en_ratio)) if use_sampler else None
+    train_loader = DataLoader(train_set, batch_size=cfg.data.batch_size, shuffle=sampler is None,
+                              sampler=sampler, num_workers=nw, collate_fn=collate, pin_memory=True,
+                              persistent_workers=nw > 0, drop_last=True)
 
     bs, vnw = max(1, cfg.data.batch_size // 2), min(2, nw)
-    val_loaders = {}
-    if cyr.test_tsv:
-        val_loaders["ru"] = DataLoader(TsvLineDataset(cyr.test_tsv, cyr.root, "test", eval_aug),
-                                       batch_size=bs, num_workers=vnw, collate_fn=collate)
-    if iam is not None and iam.test is not None:
-        val_loaders["en"] = DataLoader(HFLineDataset(iam.test, iam.image_key, iam.text_key, eval_aug),
-                                       batch_size=bs, num_workers=vnw, collate_fn=collate)
+    val_by_lang = defaultdict(list)
+    for s in sources:
+        if s.test is not None:
+            val_by_lang[s.lang].append(s.test)
+    val_loaders = {lang: DataLoader(ConcatDataset(tests), batch_size=bs, num_workers=vnw, collate_fn=collate)
+                   for lang, tests in val_by_lang.items()}
 
     device = torch.device(cfg.get("device", "cuda") if torch.cuda.is_available() else "cpu")
     train(model, processor, train_loader, val_loaders, cfg, device, resume=resume)

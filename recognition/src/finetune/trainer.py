@@ -70,11 +70,13 @@ def train(model, processor, train_loader, val_loaders, cfg, device, resume=False
     for epoch in range(start_epoch, t.num_epochs):
         model.train()
         t0 = time.time()
+        running, seen = 0.0, 0
         for i, batch in enumerate(train_loader, 1):
             pixel_values = batch["pixel_values"].to(device, non_blocking=True)
             labels = batch["labels"].to(device, non_blocking=True)
             with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=use_amp):
                 loss = model(pixel_values=pixel_values, labels=labels).loss
+            running += loss.item(); seen += 1
 
             optimizer.zero_grad(set_to_none=True)
             if scaler.is_enabled():
@@ -102,6 +104,7 @@ def train(model, processor, train_loader, val_loaders, cfg, device, resume=False
 
         with open(out / "history.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps({"epoch": epoch + 1, "select": select, "score": score,
+                                "loss": running / max(seen, 1),
                                 **{name: m.to_dict() for name, m in metrics.items()}},
                                ensure_ascii=False) + "\n")
         _save(out / "last.pt", model, optimizer, scheduler, scaler, epoch + 1, best)

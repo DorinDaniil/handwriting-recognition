@@ -15,18 +15,12 @@ def _resolve(root: str, subdir: str, name: str) -> str | None:
     return None
 
 
-class TsvLineDataset(Dataset):
-    def __init__(self, tsv_path, root, subdir, augment=None):
+class LineDataset(Dataset):
+    """Line images from a list of (image_path, text) pairs."""
+
+    def __init__(self, samples, augment=None):
+        self.samples = list(samples)
         self.augment = augment
-        self.samples = []
-        for line in Path(tsv_path).read_text(encoding="utf-8").splitlines():
-            if "\t" not in line:
-                continue
-            name, text = line.split("\t", 1)
-            text = text.strip()
-            path = _resolve(str(root), subdir, name.strip())
-            if path and text:
-                self.samples.append((path, text))
 
     def __len__(self):
         return len(self.samples)
@@ -37,6 +31,20 @@ class TsvLineDataset(Dataset):
         if self.augment is not None:
             image = self.augment(image)
         return {"image": image, "text": text}
+
+
+class TsvLineDataset(LineDataset):
+    def __init__(self, tsv_path, root, subdir, augment=None):
+        samples = []
+        for line in Path(tsv_path).read_text(encoding="utf-8").splitlines():
+            if "\t" not in line:
+                continue
+            name, text = line.split("\t", 1)
+            text = text.strip()
+            path = _resolve(str(root), subdir, name.strip())
+            if path and text:
+                samples.append((path, text))
+        super().__init__(samples, augment)
 
 
 class HFLineDataset(Dataset):
