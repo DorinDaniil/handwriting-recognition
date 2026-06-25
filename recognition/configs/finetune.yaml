@@ -62,8 +62,8 @@ data:
       lang: ru
       # images: /mnt/DATA2/varlamova/HTR/trocr/data/texts/hwr200/filtered_lines/lines
       # texts: /mnt/DATA2/varlamova/HTR/trocr/data/texts/hwr200/filtered_lines/lines_txt
-      images: /mnt/DATA2/varlamova/HTR/trocr/data/texts/hwr200/filtered_lines_v2//lines
-      texts: /mnt/DATA2/varlamova/HTR/trocr/data/texts/hwr200/filtered_lines_v2/lines_txt
+      images: /mnt/DATA2/varlamova/HTR/trocr/data/texts/hwr200/filtered_lines_v2/lines
+      texts: /mnt/DATA2/dorin/handwriting-recognition/recognition/data/lines_txt_clean
       test_frac: 0.1
       seed: 42
 
@@ -77,6 +77,6 @@ trainer:
   num_beams: 4
   log_every: 50
   select_metric: nes_char    # best model = max harmonic mean of this metric over ru/en
-  output_dir: outputs/trocr_small_bi_finetune_with_hwr200
+  output_dir: outputs/trocr_small_bi_finetune_with_hwr200_cleaned
 
 device: cuda
