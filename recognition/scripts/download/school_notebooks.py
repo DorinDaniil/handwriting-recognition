@@ -172,12 +172,20 @@ def _lines(data):
         if not text:
             continue
         own = [poly for _, ps, _ in items for poly in ps]
-        if (img, grp) in line_box:
-            box = line_box[(img, grp)]
-        else:
-            xs = [px for poly in own for px, _ in poly]
-            ys = [py for poly in own for _, py in poly]
-            box = [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)]
+        # Crop the bbox of THIS group's own words (the polygons that produced `text`), so the
+        # image always matches the label. The text_line box is used only if it actually covers
+        # those words — its group_id doesn't reliably match pupil_text, and trusting it blindly
+        # pairs a line's crop with another line's transcript.
+        xs = [px for poly in own for px, _ in poly]
+        ys = [py for poly in own for _, py in poly]
+        ox0, oy0, ox1, oy1 = min(xs), min(ys), max(xs), max(ys)
+        box = [ox0, oy0, ox1 - ox0, oy1 - oy0]
+        lb = line_box.get((img, grp))
+        if lb is not None:
+            lx, ly, lw, lh = lb
+            inter = max(0, min(ox1, lx + lw) - max(ox0, lx)) * max(0, min(oy1, ly + lh) - max(oy0, ly))
+            if inter >= 0.6 * max(1, (ox1 - ox0) * (oy1 - oy0)):   # line box really encloses the words
+                box = lb
         foreign = [poly for g, polys in ink[img] if g != grp for poly in polys]
         by_image[img].append((box, own, foreign, text))
     return by_image

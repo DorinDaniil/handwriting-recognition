@@ -24,6 +24,9 @@ DATASETS = {
     "cyrillic": lambda cfg, pv: ("cyrillic", {"root": cfg.data.get("cyrillic_root", "data/cyrillic")}),
     "iam": lambda cfg, pv: ("iam", {"iam_cfg": cfg.data.get("iam")}),
     "cvl": lambda cfg, pv: ("cvl", {"root": cfg.data.get("cvl_root", "data/cvl"), "preview": pv}),
+    "imgur5k": lambda cfg, pv: ("imgur5k", {
+        "out": cfg.data.sources.get("imgur5k", {}).get("root", "data/imgur5k"),
+        "split": "all", "preview": pv}),   # clones + downloads + crops + cleans up by itself
     "school_notebooks_ru": lambda cfg, pv: ("school_notebooks",
         {"root": "data/school_notebooks_ru", "repo": "ai-forever/school_notebooks_RU", "preview": pv}),
     "school_notebooks_en": lambda cfg, pv: ("school_notebooks",

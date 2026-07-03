@@ -1,29 +1,29 @@
 # recognition
 
-Двуязычное (EN+RU) распознавание рукописного текста на TrOCR-small. TrOCR-small уже
-знает английский; русский добавляем расширением словаря + дообучением на синтетике.
-Ядро — генератор синтетических рукописных строк (`src/synth`): шрифты + фоны
-(линейка/клетка) + аугментации, по две папки текстов и шрифтов на язык.
+Bilingual (EN+RU) handwritten text recognition on TrOCR-small. TrOCR-small already knows
+English; Russian is added by extending the vocabulary + fine-tuning. The core is a synthetic
+handwritten-line generator (`src/synth`): fonts + backgrounds (ruled/grid) + augmentations,
+with two text folders and two font folders per language.
 
-## Установка
+## Install
 ```
 pip install -r requirements.txt
 ```
-Шрифты лежат в `assets/fonts_ru` и `assets/fonts_en`. Перенести свои из любых папок:
+Fonts live in `assets/fonts_ru` and `assets/fonts_en`. Bring your own from any folders:
 ```
-python scripts/merge_fonts.py --src /мои/шрифты                   # авто-роутинг RU/EN по покрытию
-python scripts/merge_fonts.py --ru-src /мои/ru --en-src /мои/en   # явно по языкам
+python scripts/merge_fonts.py --src /my/fonts                    # auto RU/EN routing by coverage
+python scripts/merge_fonts.py --ru-src /my/ru --en-src /my/en    # explicit per language
 ```
-Либо стартовый бесплатный набор: `python scripts/fetch_fonts.py`. Свои папки можно
-указать и прямо в конфиге (`font.ru_font_dirs` / `en_font_dirs`) без копирования.
+Or a free starter set: `python scripts/fetch_fonts.py`. You can also point the config
+(`font.ru_font_dirs` / `en_font_dirs`) at your own folders without copying.
 
-## Запуск
+## Run
 ```
-python scripts/demo_synth.py      # превью assets/synth_preview.png + скорость
+python scripts/demo_synth.py      # writes assets/synth_preview.png + prints throughput
 ```
-Ноутбуки: `notebooks/synth_usage.ipynb`, `test_synth.ipynb`, `trocr_small.ipynb`.
+Notebooks: `notebooks/synth_usage.ipynb`, `test_synth.ipynb`, `trocr_small.ipynb`.
 
-## Генерация (использование)
+## Generation (usage)
 ```python
 import sys; sys.path.insert(0, ".")
 from src.synth import HandwrittenLineGenerator, make_generator
@@ -31,52 +31,48 @@ from src.synth import HandwrittenLineGenerator, make_generator
 gen = HandwrittenLineGenerator.from_dirs(
     ru_text_dirs=["/data/ru_texts"], en_text_dirs=["/data/en_texts"],
     ru_font_dirs="assets/fonts_ru", en_font_dirs="assets/fonts_en", p_ru=0.5)
-img, text = gen.sample(make_generator(42, 0, 0), step=10000)   # (PIL RGB, короткая сторона 224)
+img, text = gen.sample(make_generator(42, 0, 0), step=10000)   # (PIL RGB, short side 224)
 ```
-Каждая строка моноязычна (RU/EN по `p_ru`). Тексты режутся из `.txt` в `*_text_dirs`
-(разная длина, перенос `-`); пустые списки -> встроенные словари. `p_words=p_random=0` ->
-только реальный текст. `sample()` -> тугой кроп на бумаге (`output.min_side`=224, без белых
-полей); квадрат под TrOCR -> `fit_to_square(img, 384)`.
+Each line is monolingual (RU/EN by `p_ru`). Texts are sliced from `.txt` files in
+`*_text_dirs` (varied length, `-` hyphenation); empty lists -> built-in word lists.
+`p_words=p_random=0` -> real text only. `sample()` -> tight crop on paper
+(`output.min_side`=224, no white margins); square for TrOCR -> `fit_to_square(img, 384)`.
 
-## Токенайзер (двуязычный)
-Дописывание русских токенов в английский byte-level BPE через `add_tokens` ломает
-восстановление пробелов (RU декодится с лишними пробелами внутри слов). Поэтому обучаем
-**новый byte-level BPE на твоём EN+RU корпусе** (`train_new_from_iterator`) — round-trip
-корректный для обоих языков, русский компактный. Эмбеддинги декодера переинициализируются
-(энкодер и слои декодера остаются претренированными).
+## Tokenizer
+Appending Russian tokens to the English byte-level BPE via `add_tokens` breaks space
+reconstruction (RU decodes with spurious spaces inside words). So we train a **new byte-level
+BPE on your EN+RU corpus** (`train_new_from_iterator`) — round-trip correct for both languages
+and compact for Russian. Decoder embeddings are re-initialized (encoder and decoder layers
+stay pretrained).
 ```
 python scripts/train_tokenizer.py --ru-text-dirs /data/ru1 /data/ru2 --en-text-dirs /data/en --vocab-size 12000
-# -> assets/tokenizer_bi ; в конце печатает round-trip проверку (должно совпасть)
+# -> assets/tokenizer_bi ; prints a round-trip check at the end (must match)
 ```
-Без своего токенайзера (`model.tokenizer: null`) берётся английский byte-BPE: корректно, но RU ~2 токена/символ.
 
-## Обучение (pretrain на синтетике)
+## Pretraining on synthetic data
 ```
 python scripts/run_pretrain.py --config configs/pretrain_small.yaml
 python scripts/run_pretrain.py --resume
 ```
-Фаза 1: энкодер заморожен (`freeze_encoder_steps`) — догоняют переинициализированные эмбеддинги/голова;
-фаза 2: всё размораживается. Чекпойнты `outputs/.../best` (по CER) и `last.pt` (resume).
+Phase 1: encoder frozen (`freeze_encoder_steps`) — lets the re-initialized embeddings/head
+catch up; phase 2: everything unfrozen. Checkpoints: `outputs/.../best` (by CER) and `last.pt`
+(resume).
 
-## Структура
+## Fine-tuning
+After pretraining, fine-tune on real RU+EN lines (lower LR, same loop):
 ```
-src/synth/      генератор: config, rng, corpus(EN/RU), fonts(EN/RU), render, backgrounds, effects, generator
-src/model.py    build_trocr_small (расширение словаря) + build_processor
-src/data.py     SynthLineDataset (бесконечный) + FixedSynthValDataset + TrOCRCollator
-src/train.py    train_model: freeze->unfreeze, AMP, cosine+warmup, CER/WER, чекпойнты
-scripts/        fetch_fonts, train_tokenizer, demo_synth, run_pretrain
-configs/        pretrain_small.yaml
+python scripts/run_finetune.py --config configs/finetune.yaml
+python scripts/run_finetune.py --resume
+```
+Data sources are listed in `configs/finetune.yaml` (`data.sources`, each with its own
+`kind`/`lang`); downloading lives in `scripts/download/`. Evaluate a checkpoint per source:
+```
+python scripts/eval_finetune.py --checkpoint outputs/<run>/best   # CER/WER/NES_char/NES_word
 ```
 
-## Конфиг (часто меняемое)
-`corpus.ru_text_dirs`/`en_text_dirs`, `corpus.p_ru`, `len_chars`, `p_hyphenate`,
-`font.ru_font_dirs`/`en_font_dirs`, `paper.p_grid`/`p_ruled`, `output.min_side`,
-`warmup_steps`, `curriculum`. `step` в `sample(rng, step)` управляет сложностью.
-
-## Реальные данные (валидация / finetune, не синтетика)
-- Cyrillic Handwriting Dataset (Kaggle, ~73k строк), HKR (github.com/abdoelsayed2016/HKR_Dataset).
-- английские строки — IAM и т.п.
-- Чекпойнты выбираем по реальному CER; синтетика — только обучение.
-
-## Дальше
-Finetune с `outputs/.../best` на реальных RU+EN строках (тот же цикл, реальный лоадер, ниже LR).
+## Layout
+- `src/synth/` — synthetic generator (corpus/fonts/backgrounds/effects)
+- `src/model.py` — `build_trocr_small` (vocab extension) + `build_processor`
+- `src/data.py`, `src/finetune/` — datasets, augmentations, metrics
+- `scripts/` — pretrain / finetune / eval / tokenizer / fonts / data download
+- `configs/` — `pretrain_small.yaml`, `pretrain_stage2.yaml`, `finetune.yaml`

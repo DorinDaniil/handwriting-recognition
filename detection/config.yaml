@@ -2,7 +2,7 @@
 #   python train.py trainer.epochs=200 data.batch_size=4 model.backbone.pretrained=false
 
 experiment:
-  name: dbnetpp_r18_hwr_clear
+  name: dbnetpp_r34_hwr
   output_dir: outputs
   seed: 42
 
@@ -44,7 +44,7 @@ model:
     #   resnet34      : sweet spot, 21M params, BasicBlock like R18, DCNv2 supported
     #   resnet50      : stronger, 25M params, Bottleneck, DCNv2 supported
     #   convnext_tiny : modern SOTA CNN, 28M params, ignores use_dcn
-    name: resnet18
+    name: resnet34
     pretrained: true
     use_dcn: true             # DCNv2 in stages 3-5 (resnet only)
     dcn_stages: [false, false, true, true, true]   # stage 1..5

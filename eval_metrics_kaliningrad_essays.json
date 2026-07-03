@@ -1,0 +1,316 @@
+{
+  "runs": {
+    "kaliningrad_essays | rec=trocr_small_bi_finetune_with_hwr200_cleaned/best | det=best@dbnetpp_r34_hwr | beams=4 | raw": {
+      "dataset": "kaliningrad_essays",
+      "lang": "ru",
+      "samples": 12,
+      "rec_ckpt": "/workspace/HDD/handwriting-recognition/recognition/outputs/trocr_small_bi_finetune_with_hwr200_cleaned/best",
+      "det_ckpt": "/workspace/HDD/handwriting-recognition/detection/outputs/dbnetpp_r34_hwr/best.pt",
+      "num_beams": 4,
+      "join_hyphen": false,
+      "timestamp": "2026-07-03T10:49:14",
+      "metrics": {
+        "cer": {
+          "mean": 0.1163,
+          "std": 0.1235
+        },
+        "wer": {
+          "mean": 0.2454,
+          "std": 0.1379
+        },
+        "nes_char": {
+          "mean": 0.8839,
+          "std": 0.1233
+        },
+        "nes_word": {
+          "mean": 0.7548,
+          "std": 0.1379
+        }
+      },
+      "pages": [
+        {
+          "page": "0253641946/20240207-04800001.jpg",
+          "det_lines": 30,
+          "ref_chars": 1068,
+          "ref_words": 159,
+          "sec": 0.912,
+          "cer": 0.0665,
+          "wer": 0.239,
+          "nes_char": 0.9336,
+          "nes_word": 0.761
+        },
+        {
+          "page": "0253641946/20240207-04800002.jpg",
+          "det_lines": 27,
+          "ref_chars": 1051,
+          "ref_words": 150,
+          "sec": 0.541,
+          "cer": 0.0742,
+          "wer": 0.2733,
+          "nes_char": 0.9258,
+          "nes_word": 0.7267
+        },
+        {
+          "page": "0253698070/20240207-05400001.jpg",
+          "det_lines": 27,
+          "ref_chars": 1789,
+          "ref_words": 267,
+          "sec": 0.692,
+          "cer": 0.3885,
+          "wer": 0.4944,
+          "nes_char": 0.6115,
+          "nes_word": 0.5056
+        },
+        {
+          "page": "0253698070/20240207-05400002.jpg",
+          "det_lines": 16,
+          "ref_chars": 1045,
+          "ref_words": 157,
+          "sec": 0.422,
+          "cer": 0.3646,
+          "wer": 0.4777,
+          "nes_char": 0.6371,
+          "nes_word": 0.5223
+        },
+        {
+          "page": "0253698797/20240207-07000001.jpg",
+          "det_lines": 25,
+          "ref_chars": 1617,
+          "ref_words": 233,
+          "sec": 0.584,
+          "cer": 0.0798,
+          "wer": 0.2017,
+          "nes_char": 0.9202,
+          "nes_word": 0.7983
+        },
+        {
+          "page": "0253698797/20240207-07000002.jpg",
+          "det_lines": 18,
+          "ref_chars": 1031,
+          "ref_words": 154,
+          "sec": 0.458,
+          "cer": 0.063,
+          "wer": 0.1883,
+          "nes_char": 0.937,
+          "nes_word": 0.8117
+        },
+        {
+          "page": "0253699169/20240207-06200001.jpg",
+          "det_lines": 27,
+          "ref_chars": 1635,
+          "ref_words": 240,
+          "sec": 0.641,
+          "cer": 0.0581,
+          "wer": 0.2333,
+          "nes_char": 0.942,
+          "nes_word": 0.7667
+        },
+        {
+          "page": "0253699169/20240207-06200002.jpg",
+          "det_lines": 5,
+          "ref_chars": 320,
+          "ref_words": 47,
+          "sec": 0.191,
+          "cer": 0.0125,
+          "wer": 0.0426,
+          "nes_char": 0.9875,
+          "nes_word": 0.9574
+        },
+        {
+          "page": "0253699244/20240207-04100001.jpg",
+          "det_lines": 24,
+          "ref_chars": 2127,
+          "ref_words": 332,
+          "sec": 0.719,
+          "cer": 0.1838,
+          "wer": 0.3976,
+          "nes_char": 0.8162,
+          "nes_word": 0.6024
+        },
+        {
+          "page": "0253699481/20240207-07400001.jpg",
+          "det_lines": 25,
+          "ref_chars": 1197,
+          "ref_words": 168,
+          "sec": 0.52,
+          "cer": 0.0459,
+          "wer": 0.125,
+          "nes_char": 0.9541,
+          "nes_word": 0.875
+        },
+        {
+          "page": "0253699481/20240207-07400002.jpg",
+          "det_lines": 26,
+          "ref_chars": 1225,
+          "ref_words": 170,
+          "sec": 0.549,
+          "cer": 0.0376,
+          "wer": 0.1765,
+          "nes_char": 0.9626,
+          "nes_word": 0.8256
+        },
+        {
+          "page": "0253699481/20240207-07400003.jpg",
+          "det_lines": 15,
+          "ref_chars": 664,
+          "ref_words": 94,
+          "sec": 0.325,
+          "cer": 0.0211,
+          "wer": 0.0957,
+          "nes_char": 0.9789,
+          "nes_word": 0.9043
+        }
+      ]
+    },
+    "kaliningrad_essays | engine=yandex | model=handwritten | raw": {
+      "dataset": "kaliningrad_essays",
+      "lang": "ru",
+      "engine": "yandex",
+      "model": "handwritten",
+      "samples": 12,
+      "errors": 0,
+      "join_hyphen": false,
+      "timestamp": "2026-07-03T10:56:29",
+      "metrics": {
+        "cer": {
+          "mean": 0.1821,
+          "std": 0.1173
+        },
+        "wer": {
+          "mean": 0.2569,
+          "std": 0.1471
+        },
+        "nes_char": {
+          "mean": 0.842,
+          "std": 0.0877
+        },
+        "nes_word": {
+          "mean": 0.7678,
+          "std": 0.1301
+        }
+      },
+      "pages": [
+        {
+          "page": "0253641946/20240207-04800001.jpg",
+          "ref_chars": 1068,
+          "ref_words": 159,
+          "sec": 1.85,
+          "cer": 0.3567,
+          "wer": 0.5723,
+          "nes_char": 0.6755,
+          "nes_word": 0.4709
+        },
+        {
+          "page": "0253641946/20240207-04800002.jpg",
+          "ref_chars": 1051,
+          "ref_words": 150,
+          "sec": 1.852,
+          "cer": 0.2322,
+          "wer": 0.4667,
+          "nes_char": 0.7889,
+          "nes_word": 0.5679
+        },
+        {
+          "page": "0253698070/20240207-05400001.jpg",
+          "ref_chars": 1789,
+          "ref_words": 267,
+          "sec": 1.913,
+          "cer": 0.0805,
+          "wer": 0.1199,
+          "nes_char": 0.9244,
+          "nes_word": 0.8857
+        },
+        {
+          "page": "0253698070/20240207-05400002.jpg",
+          "ref_chars": 1045,
+          "ref_words": 157,
+          "sec": 1.878,
+          "cer": 0.1273,
+          "wer": 0.1529,
+          "nes_char": 0.8857,
+          "nes_word": 0.858
+        },
+        {
+          "page": "0253698797/20240207-07000001.jpg",
+          "ref_chars": 1617,
+          "ref_words": 233,
+          "sec": 2.05,
+          "cer": 0.1694,
+          "wer": 0.2361,
+          "nes_char": 0.846,
+          "nes_word": 0.78
+        },
+        {
+          "page": "0253698797/20240207-07000002.jpg",
+          "ref_chars": 1031,
+          "ref_words": 154,
+          "sec": 1.62,
+          "cer": 0.2619,
+          "wer": 0.3377,
+          "nes_char": 0.7644,
+          "nes_word": 0.6923
+        },
+        {
+          "page": "0253699169/20240207-06200001.jpg",
+          "ref_chars": 1635,
+          "ref_words": 240,
+          "sec": 1.862,
+          "cer": 0.0752,
+          "wer": 0.1375,
+          "nes_char": 0.9287,
+          "nes_word": 0.8675
+        },
+        {
+          "page": "0253699169/20240207-06200002.jpg",
+          "ref_chars": 320,
+          "ref_words": 47,
+          "sec": 1.67,
+          "cer": 0.4594,
+          "wer": 0.4043,
+          "nes_char": 0.6845,
+          "nes_word": 0.7077
+        },
+        {
+          "page": "0253699244/20240207-04100001.jpg",
+          "ref_chars": 2127,
+          "ref_words": 332,
+          "sec": 1.981,
+          "cer": 0.1166,
+          "wer": 0.244,
+          "nes_char": 0.8887,
+          "nes_word": 0.7652
+        },
+        {
+          "page": "0253699481/20240207-07400001.jpg",
+          "ref_chars": 1197,
+          "ref_words": 168,
+          "sec": 1.897,
+          "cer": 0.1128,
+          "wer": 0.131,
+          "nes_char": 0.8948,
+          "nes_word": 0.8764
+        },
+        {
+          "page": "0253699481/20240207-07400002.jpg",
+          "ref_chars": 1225,
+          "ref_words": 170,
+          "sec": 1.946,
+          "cer": 0.0906,
+          "wer": 0.1529,
+          "nes_char": 0.9158,
+          "nes_word": 0.8579
+        },
+        {
+          "page": "0253699481/20240207-07400003.jpg",
+          "ref_chars": 664,
+          "ref_words": 94,
+          "sec": 1.445,
+          "cer": 0.1024,
+          "wer": 0.1277,
+          "nes_char": 0.9068,
+          "nes_word": 0.8846
+        }
+      ]
+    }
+  }
+}

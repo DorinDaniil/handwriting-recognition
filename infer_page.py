@@ -162,7 +162,8 @@ class LineDetector:
     """
 
     def __init__(self, config: Path, ckpt: Path, device: torch.device, use_ema: bool = True,
-                 expand_w: float = 0.08, expand_h: float = 0.20):
+                 # expand_w: float = 0.08, expand_h: float = 0.24):
+                 expand_w: float = 0.04, expand_h: float = 0.16):
         cfg = OmegaConf.load(config)
         cfg.model.backbone.pretrained = False
         self.size = int(cfg.data.image_size)
@@ -178,7 +179,8 @@ class LineDetector:
 
         model = build_model(cfg)
         state = torch.load(ckpt, map_location="cpu")
-        weights = state["ema"] if (use_ema and state.get("ema") is not None) else state["model"]
+        # weights = state["ema"] if (use_ema and state.get("ema") is not None) else state["model"]
+        weights = state
         model.load_state_dict(weights)
         self.model = model.eval().to(device)
         tag = "EMA" if (use_ema and state.get("ema") is not None) else "raw"
@@ -359,7 +361,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Handwritten page -> recognized text (detection + TrOCR).")
     p.add_argument("--image", type=Path, required=True, help="page image to recognize")
     p.add_argument("--det-config", type=Path, default=DET_ROOT / "config.yaml")
-    p.add_argument("--det-ckpt", type=Path, default=DET_ROOT / "outputs/dbnetpp_r18_hwr_clear/best.pt")
+    p.add_argument("--det-ckpt", type=Path, default=DET_ROOT / "outputs/dbnetpp_r18_hwr/best.pt")
     p.add_argument("--rec-config", type=Path, default=REC_ROOT / "configs/finetune.yaml")
     p.add_argument("--rec-ckpt", type=Path, default=REC_ROOT / "outputs/trocr_small_bi_finetune/best")
     p.add_argument("--device", default="cuda")

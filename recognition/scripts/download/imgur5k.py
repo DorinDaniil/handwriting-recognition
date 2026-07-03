@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
-"""Build a word-level manifest from the IMGUR5K handwriting dataset (English, in-the-wild).
+"""Build a word-level manifest from IMGUR5K (English handwriting, in-the-wild).
 
-IMGUR5K ships as image URLs + rotated word boxes. First clone the repo and download images
-with THEIR tool (images aren't redistributed):
+Does everything end to end: clones the IMGUR5K repo, downloads the images with THEIR tool,
+crops each rotated word box into an upright crop (PIL only), writes <out>/<split>.tsv
+(crop_path<TAB>word) for src.finetune.TsvLineDataset, then deletes the clone.
 
-    git clone https://github.com/facebookresearch/IMGUR5K-Handwriting-Dataset
-    cd IMGUR5K-Handwriting-Dataset
-    python download_imgur5k.py --dataset_info_dir dataset_info --output_dir images
+    python scripts/download/imgur5k.py --out data/imgur5k            # full auto
+    python scripts/download/imgur5k.py --out data/imgur5k --keep     # keep the clone
+    python scripts/download/imgur5k.py --out data/imgur5k --root /existing/clone   # reuse a clone
 
-Then point this script at the clone — it crops each word box (rotated rect -> upright crop,
-PIL only) and writes <out>/<split>.tsv (crop_path<TAB>word) for src.finetune.TsvLineDataset:
-
-    python scripts/download/imgur5k.py --root /path/IMGUR5K-Handwriting-Dataset \
-        --split train --out /workspace/.../data/imgur5k
+Requires `git` and the IMGUR5K downloader's deps (`requests`). Crops go to <out> (must be
+writable); the temporary clone lives next to <out> and is removed at the end unless --keep.
 """
 import argparse
 import json
 import math
+import re
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +28,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+REPO_URL = "https://github.com/facebookresearch/IMGUR5K-Handwriting-Dataset"
 IMG_EXT = (".jpg", ".jpeg", ".png", ".bmp")
 
 
@@ -38,10 +41,8 @@ def _order_quad(pts):
 def _corners(xc, yc, w, h, angle_deg):
     a = math.radians(angle_deg)
     ca, sa = math.cos(a), math.sin(a)
-    out = []
-    for dx, dy in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)):
-        out.append((xc + dx * ca - dy * sa, yc + dx * sa + dy * ca))
-    return out
+    return [(xc + dx * ca - dy * sa, yc + dx * sa + dy * ca)
+            for dx, dy in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2))]
 
 
 def _warp(page, xc, yc, w, h, angle):
@@ -56,8 +57,8 @@ def _warp(page, xc, yc, w, h, angle):
         return None
 
 
-def _load_ann(root: Path, split: str) -> dict:
-    p = root / "dataset_info" / f"imgur5k_annotations_{split}.json"
+def _load_ann(repo: Path, split: str) -> dict:
+    p = repo / "dataset_info" / f"imgur5k_annotations_{split}.json"
     if not p.exists():
         raise FileNotFoundError(f"annotation file not found: {p}")
     return json.loads(p.read_text(encoding="utf-8"))
@@ -81,7 +82,7 @@ def build_split(images: Path, ann: dict, out_root: Path, split: str, limit: int 
         for aid in ann_ids:
             word = (anns.get(aid, {}).get("word") or "").strip()
             box = anns.get(aid, {}).get("bounding_box", ".")
-            if not word or word == "." or "." == box:
+            if not word or word == "." or box == ".":
                 continue
             try:
                 xc, yc, w, h, angle = (float(v) for v in box.strip("[] ").split(","))
@@ -99,26 +100,86 @@ def build_split(images: Path, ann: dict, out_root: Path, split: str, limit: int 
     return records
 
 
+def _patch_downloader(repo: Path):
+    """Their old download_imgur5k.py needs a few fixes to run on modern stacks: a User-Agent
+    header (Imgur 403s without one, PR #17), deprecated numpy aliases like np.str (removed in
+    NumPy >= 1.24), and np.loadtxt(delimiter="\\n") (newline delimiter now rejected)."""
+    f = repo / "download_imgur5k.py"
+    src = orig = f.read_text(encoding="utf-8")
+    src = src.replace(
+        "requests.get(image_url).content",
+        'requests.get(image_url, headers={"User-Agent": "Mozilla/5.0"}).content',
+    )
+    src = re.sub(r"\bnp\.(str|int|float|bool|object|long|unicode)(?!\w)", r"\1", src)
+    src = src.replace(r'delimiter="\n"', "delimiter=None").replace(r"delimiter='\n'", "delimiter=None")
+    if src != orig:
+        f.write_text(src, encoding="utf-8")
+        print("patched download_imgur5k.py (User-Agent + numpy aliases + loadtxt delimiter)")
+
+
+def clone_and_fetch(work: Path) -> Path:
+    """Shallow-clone the repo into `work` and download the images with their tool."""
+    repo = work / "IMGUR5K-Handwriting-Dataset"
+    if not repo.exists():
+        print(f"cloning {REPO_URL} -> {repo}")
+        subprocess.run(["git", "clone", "--depth", "1", REPO_URL, str(repo)], check=True)
+    images = repo / "images"
+    if not (images.exists() and any(images.iterdir())):
+        _patch_downloader(repo)                      # User-Agent (Imgur 403) + np.str (NumPy>=1.24)
+        print("downloading images (their tool — this fetches ~8k images, slow)...")
+        subprocess.run([sys.executable, "download_imgur5k.py",
+                        "--dataset_info_dir", "dataset_info", "--output_dir", "images"],
+                       cwd=repo, check=True)
+    return repo
+
+
+def download(out="data/imgur5k", root=None, work=None, split="all", keep=False, limit=0, preview=False):
+    out_root = Path(out) if Path(out).is_absolute() else ROOT / out
+    out_root.mkdir(parents=True, exist_ok=True)
+    if preview:
+        print("imgur5k: preview skipped (needs the full ~8k-image download)")
+        return {"out": str(out_root)}
+
+    clone_area = None
+    if root:
+        repo = Path(root)
+    else:
+        clone_area = Path(work) if work else out_root.parent / "_imgur5k_src"
+        clone_area.mkdir(parents=True, exist_ok=True)
+        repo = clone_and_fetch(clone_area)
+
+    try:
+        def crops(sp):
+            return build_split(repo / "images", _load_ann(repo, sp), out_root, sp, limit)
+        if split == "all":
+            written = {"train": crops("train") + crops("val"),   # val folded into train
+                       "test": crops("test")}
+        else:
+            written = {split: crops(split)}
+        summary = {"out": str(out_root)}
+        for name, recs in written.items():
+            (out_root / f"{name}.tsv").write_text(
+                "".join(f"{p}\t{t}\n" for p, t in recs), encoding="utf-8")
+            summary[name] = len(recs)
+            print(f"{name}: {len(recs)} word crops -> {out_root / f'{name}.tsv'}")
+        return summary
+    finally:
+        if clone_area and not keep:
+            shutil.rmtree(clone_area, ignore_errors=True)
+            print(f"removed clone: {clone_area}")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", required=True, help="cloned IMGUR5K repo (has dataset_info/ + images)")
-    ap.add_argument("--images", default=None, help="images dir (default <root>/images)")
-    ap.add_argument("--split", default="train", choices=["train", "val", "test", "all"])
     ap.add_argument("--out", default="data/imgur5k", help="output dir for crops + tsv (writable!)")
+    ap.add_argument("--split", default="all", choices=["train", "val", "test", "all"],
+                    help="'all' folds val into train.tsv and writes test.tsv separately")
+    ap.add_argument("--root", default=None, help="reuse an existing clone instead of cloning")
+    ap.add_argument("--work", default=None, help="where to clone (default: <out>/../_imgur5k_src)")
+    ap.add_argument("--keep", action="store_true", help="do not delete the clone afterwards")
     ap.add_argument("--limit", type=int, default=0, help="cap crops (debug)")
     args = ap.parse_args()
-
-    root = Path(args.root)
-    images = Path(args.images) if args.images else root / "images"
-    out_root = Path(args.out) if Path(args.out).is_absolute() else ROOT / args.out
-    out_root.mkdir(parents=True, exist_ok=True)
-
-    splits = ["train", "val", "test"] if args.split == "all" else [args.split]
-    for split in splits:
-        recs = build_split(images, _load_ann(root, split), out_root, split, args.limit)
-        (out_root / f"{split}.tsv").write_text(
-            "".join(f"{p}\t{t}\n" for p, t in recs), encoding="utf-8")
-        print(f"{split}: {len(recs)} word crops -> {out_root / f'{split}.tsv'}")
+    print("imgur5k:", download(args.out, args.root, args.work, args.split, args.keep, args.limit))
 
 
 if __name__ == "__main__":
