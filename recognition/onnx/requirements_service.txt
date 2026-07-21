@@ -1,0 +1,7 @@
+optimum-onnx
+torch>=2.4
+onnx==1.16.0
+onnxruntime==1.21.0
+tokenizers>=0.15
+numpy
+Pillow

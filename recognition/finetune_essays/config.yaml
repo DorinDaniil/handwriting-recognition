@@ -1,0 +1,42 @@
+# Light fine-tune of the recognizer on the hand-labelled essays (ideal polygons + text).
+#   python finetune_essays/run.py --config finetune_essays/config.yaml
+#   python finetune_essays/run.py --resume
+
+# Path to the labelled dataset (folder holding labels.txt + <folder>/<image>.jpg|.txt|.json).
+data_root: /mnt/DATA2/dorin/handwriting-recognition/data/kaliningrad_essays
+labels: labels.txt
+seed: 42
+test_frac: 0.1
+
+# Frame jitter: polygons are rectified to upright crops; per train sample the box is randomly
+# expanded outward up to jitter_pos (pulls real neighbouring pixels) OR cropped inward up to
+# jitter_neg (tighter than the labelled box) — set the + and - amounts independently. Eval always
+# uses the exact labelled box (0). margin_frac pads the warped crop with the page background.
+jitter_pos: 0.02        # max outward expansion (+)
+jitter_neg: 0.01        # max inward crop (-)
+margin_frac: 0.06
+aug_prob: 0.7            # chance to apply the photometric pipeline (shadow/colour/blur/quality/jpeg)
+
+loader:
+  batch_size: 16
+  num_workers: 8
+
+model:
+  # start from the current best recognizer; override with --rec-ckpt if needed
+  pretrained: outputs/trocr_small_bi_finetune_with_hwr200_cleaned_v4/best
+  tokenizer: assets/tokenizer_bi
+  max_target_len: 128
+
+trainer:
+  num_epochs: 5
+  lr: 1.0e-5              # small — this is polishing on a tiny, clean set
+  weight_decay: 0.01
+  warmup_steps: 50
+  amp_dtype: bf16
+  grad_clip: 1.0
+  num_beams: 4
+  log_every: 20
+  select_metric: nes_char
+  output_dir: outputs/trocr_small_essays_ft
+
+device: cuda

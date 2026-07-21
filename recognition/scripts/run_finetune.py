@@ -22,7 +22,8 @@ from transformers import AutoTokenizer
 
 from src.data import TrOCRCollator
 from src.finetune import Augmenter, build_sources
-from src.finetune.trainer import train
+# from src.finetune.trainer import train
+from src.finetune.trainer_v2 import train
 from src.model import build_processor, build_trocr_small
 
 

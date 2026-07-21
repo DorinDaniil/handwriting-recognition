@@ -11,7 +11,7 @@ data:
   batch_size: 96
   num_workers: 8
   en_ratio: null              # share of English per batch (null -> natural proportion by size)
-  aug_prob: 0.3               # chance to augment a train image (1-aug_prob -> clean image)
+  aug_prob: 0.4               # chance to augment a train image (1-aug_prob -> clean image)
 
   # Toggle each source with `enabled`. lang (ru/en) drives en_ratio balancing and per-language eval.
   sources:
@@ -75,9 +75,8 @@ data:
       seed: 42
 
 trainer:
-  num_epochs: 15
-  # lr: 3.0e-5
-  lr: 1.0e-5
+  num_epochs: 20
+  lr: 3.0e-5
   weight_decay: 0.01
   warmup_steps: 500
   amp_dtype: bf16
@@ -85,6 +84,6 @@ trainer:
   num_beams: 4
   log_every: 50
   select_metric: nes_char    # best model = max harmonic mean of this metric over ru/en
-  output_dir: outputs/trocr_small_bi_finetune_with_hwr200_cleaned_v2
+  output_dir: outputs/trocr_small_bi_finetune_with_hwr200_cleaned
 
 device: cuda

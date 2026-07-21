@@ -210,6 +210,8 @@ __marimo__/
 data/
 outputs/
 labels/
+onnx_out/
+eval_metrics_kaliningrad_essays.json
 
 # recognition: fetched fonts (RU/EN), trained tokenizer, generated paper, training outputs
 recognition/assets/fonts*/*.ttf

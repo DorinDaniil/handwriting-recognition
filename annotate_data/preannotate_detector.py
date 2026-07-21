@@ -33,7 +33,7 @@ from PIL import Image
 REPO = Path(__file__).resolve().parent
 DET_ROOT = REPO / "detection"
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
-SKIP_DIRS = {".ipynb_checkpoints"}
+SKIP_DIRS = {"cleaned", "data_cropped", ".ipynb_checkpoints"}
 
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
@@ -88,28 +88,16 @@ def expand_quad(quad: np.ndarray, expand_w: float, expand_h: float) -> np.ndarra
 
 
 def reading_order(quads: list[np.ndarray]) -> list[int]:
-    """Indices of quads in reading order: rows top->bottom, left->right."""
+    """Indices top->bottom by the box's top edge, left->right within a line (top-y bucketed by
+    half the median box height — robust for tightly-spaced prose)."""
     if not quads:
         return []
-    boxes = []
-    for i, q in enumerate(quads):
-        ys = q[:, 1]
-        boxes.append((i, float(q[:, 0].min()), float(ys.min()), float(ys.max()),
-                      float((ys.min() + ys.max()) / 2)))
-    line_h = float(np.median([b[3] - b[2] for b in boxes])) or 1.0
-    rows: list[dict] = []
-    for b in sorted(boxes, key=lambda b: b[4]):
-        for row in rows:
-            if abs(b[4] - row["yc"]) < 0.6 * line_h:
-                row["items"].append(b)
-                row["yc"] = float(np.mean([x[4] for x in row["items"]]))
-                break
-        else:
-            rows.append({"yc": b[4], "items": [b]})
-    order: list[int] = []
-    for row in sorted(rows, key=lambda r: r["yc"]):
-        order.extend(b[0] for b in sorted(row["items"], key=lambda b: b[1]))
-    return order
+    band = 0.5 * (float(np.median([float(q[:, 1].max() - q[:, 1].min()) for q in quads])) or 1.0)
+
+    def key(i):
+        q = quads[i]
+        return (round(float(q[:, 1].min()) / band), float(q[:, 0].min()))
+    return sorted(range(len(quads)), key=key)
 
 
 def pick_device(req: str) -> torch.device:
@@ -138,8 +126,7 @@ class LineDetector:
         self.device = device
         model = build_model(cfg)
         state = torch.load(ckpt, map_location="cpu")
-        # weights = state["ema"] if (use_ema and state.get("ema") is not None) else state["model"]
-        weights = state
+        weights = state["ema"] if (use_ema and state.get("ema") is not None) else state["model"]
         model.load_state_dict(weights)
         self.model = model.eval().to(device)
         tag = "EMA" if (use_ema and state.get("ema") is not None) else "raw"

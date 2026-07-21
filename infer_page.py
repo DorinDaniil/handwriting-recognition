@@ -121,30 +121,9 @@ def warp_crop(rgb: np.ndarray, quad: np.ndarray, bg: tuple[int, int, int],
 
 
 def reading_order(quads: list[np.ndarray]) -> list[int]:
-    """Indices of ``quads`` in reading order: rows top->bottom, left->right."""
-    if not quads:
-        return []
-    boxes = []
-    for i, q in enumerate(quads):
-        ys = q[:, 1]
-        boxes.append((i, float(q[:, 0].min()), float(ys.min()), float(ys.max()),
-                      float((ys.min() + ys.max()) / 2)))
-    line_h = float(np.median([b[3] - b[2] for b in boxes])) or 1.0
-
-    rows: list[dict] = []
-    for b in sorted(boxes, key=lambda b: b[4]):
-        for row in rows:
-            if abs(b[4] - row["yc"]) < 0.6 * line_h:
-                row["items"].append(b)
-                row["yc"] = float(np.mean([x[4] for x in row["items"]]))
-                break
-        else:
-            rows.append({"yc": b[4], "items": [b]})
-
-    order: list[int] = []
-    for row in sorted(rows, key=lambda r: r["yc"]):
-        order.extend(b[0] for b in sorted(row["items"], key=lambda b: b[1]))
-    return order
+    """Indices sorted by the box's top edge (top->bottom), ties broken by left edge (left->right)."""
+    return sorted(range(len(quads)),
+                  key=lambda i: (float(quads[i][:, 1].min()), float(quads[i][:, 0].min())))
 
 
 def pick_device(requested: str) -> torch.device:
@@ -163,7 +142,7 @@ class LineDetector:
 
     def __init__(self, config: Path, ckpt: Path, device: torch.device, use_ema: bool = True,
                  # expand_w: float = 0.08, expand_h: float = 0.24):
-                 expand_w: float = 0.04, expand_h: float = 0.16):
+                 expand_w: float = 0.04, expand_h: float = 0.36): # было 0.16
         cfg = OmegaConf.load(config)
         cfg.model.backbone.pretrained = False
         self.size = int(cfg.data.image_size)
@@ -361,7 +340,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Handwritten page -> recognized text (detection + TrOCR).")
     p.add_argument("--image", type=Path, required=True, help="page image to recognize")
     p.add_argument("--det-config", type=Path, default=DET_ROOT / "config.yaml")
-    p.add_argument("--det-ckpt", type=Path, default=DET_ROOT / "outputs/dbnetpp_r18_hwr/best.pt")
+    p.add_argument("--det-ckpt", type=Path, default=DET_ROOT / "outputs/dbnetpp_r18_hwr_clear/best.pt")
     p.add_argument("--rec-config", type=Path, default=REC_ROOT / "configs/finetune.yaml")
     p.add_argument("--rec-ckpt", type=Path, default=REC_ROOT / "outputs/trocr_small_bi_finetune/best")
     p.add_argument("--device", default="cuda")
