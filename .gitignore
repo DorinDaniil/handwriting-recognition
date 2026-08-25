@@ -213,6 +213,12 @@ labels/
 onnx_out/
 eval_metrics_kaliningrad_essays.json
 
+checkpoints/
+checkpoints_1/
+clean_paths.txt
+noise_scores.json
+eval_metrics.json
+
 # recognition: fetched fonts (RU/EN), trained tokenizer, generated paper, training outputs
 recognition/assets/fonts*/*.ttf
 recognition/assets/fonts*/*.otf

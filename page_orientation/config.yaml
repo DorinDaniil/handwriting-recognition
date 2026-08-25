@@ -1,0 +1,28 @@
+data:
+  dir: /mnt/DATA2/varlamova/HTR/trocr/data/texts/hwr200/texts   # page images in upright orientation, searched recursively
+  file_list: clean_paths.txt                   # optional: txt with one image path per line (from clean_dataset.ipynb); overrides dir
+  val_frac: 0.1
+  seed: 42
+
+train:
+  epochs: 15                        # total target epoch count (resume continues towards it)
+  batch_size: 128
+  lr: 3.0e-4                        # peak LR after warmup
+  warmup_frac: 0.03                 # fraction of total steps for linear warmup
+  min_lr_frac: 0.05                 # cosine decays to lr * min_lr_frac (never to zero)
+  num_workers: 4
+  device: cuda                      # falls back to cpu if unavailable
+  resume: true                      # resume from last.pt if present (falls back to best.pt weights)
+
+model:
+  input_size: 512
+  mean: [0.694, 0.695, 0.693]
+  std: [0.299, 0.296, 0.301]
+
+aug:
+  brightness: 0.3
+  contrast: 0.3
+  saturation: 0.3
+  hue: 0.05
+
+out_dir: checkpoints_1

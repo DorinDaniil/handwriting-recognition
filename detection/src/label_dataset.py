@@ -178,7 +178,8 @@ def main():
                         help="Root directory of the dataset (HWR200).")
     parser.add_argument("--out-dir", type=Path, required=True,
                         help="Where to save labels.")
-    parser.add_argument("--model-name", default="PP-OCRv5_server_det")
+    # parser.add_argument("--model-name", default="PP-OCRv5_server_det")
+    parser.add_argument("--model-name", default="PP-OCRv6_medium_det")
     parser.add_argument("--device", default="gpu:0")
     parser.add_argument("--limit-side-len", type=int, default=1440,
                         help="Bigger = more accurate on small text, slower, more VRAM.")
