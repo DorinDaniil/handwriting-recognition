@@ -1,0 +1,103 @@
+# Pretraining from scratch on synthetic lines (the generator from recognition/src/synth).
+#   python scripts/train.py --config configs/pretrain.yaml
+#   python scripts/train.py --config configs/pretrain.yaml --resume
+
+run: outputs/pretrain
+seed: 42
+device: cuda
+
+image:
+  height: 96              # every line is resized to this height, the width follows the aspect ratio
+  max_width: 1536         # only lines wider than this get squeezed
+
+model:
+  dim: 384
+  heads: 6
+  encoder_layers: 12
+  decoder_layers: 4
+  stem: [32, 64, 128, 192, 256]
+  dropout: 0.1
+  max_text_len: 160
+
+loss:
+  ctc_weight: 0.5         # loss = ctc_weight * CTC + (1 - ctc_weight) * decoder cross-entropy
+  label_smoothing: 0.1
+
+frame:                    # margins of a line crop around its box, in box heights
+  infer: [0.30, 0.25]     # [left/right, top/bottom] around a detector box at inference
+  detector: {x: [0.10, 0.60], y: [0.10, 0.40]}    # training range around detector boxes
+  labelled: {x: [0.00, 0.40], y: [-0.03, 0.15]}   # training range around hand-labelled polygons
+
+augment:                  # real crops only; synthetic lines are augmented by the generator
+  photometric: 0.6
+  context: {p: 0.7, x: [0.0, 0.5], y: [0.0, 0.3], neighbour: 0.4}
+
+data:
+  batch_size: 128         # lines per batch at ref_width; wider lines -> fewer lines per batch
+  ref_width: 640
+  pool_batches: 6         # samples are sorted by width inside a pool of this many batches
+  workers: 8
+  sources:
+    synth:
+      kind: synth
+      weight: 0.97
+      recognition_root: ../recognition
+      ru_text_dirs: ['/mnt/DATA2/varlamova/HTR/trocr/data/texts/school', '/mnt/DATA2/varlamova/HTR/trocr/data/texts/general']
+      en_text_dirs: ['/mnt/DATA2/varlamova/HTR/trocr/data/texts/english']
+      ru_text_weights: [0.6, 0.4]
+      ru_font_dirs: ['/mnt/DATA2/dorin/handwriting-recognition/recognition/assets/fonts_ru']
+      en_font_dirs: ['/mnt/DATA2/dorin/handwriting-recognition/recognition/assets/fonts_en']
+      p_ru: 0.6
+      len_chars: [4, 100]
+      p_hyphenate: 0.15
+      seed: 42
+      curriculum: true
+      warmup_steps: 20000   # difficulty ramps from easy to full over these steps
+      val_samples: 1000
+      overrides:            # same blocks as SynthConfig; everything not listed keeps its default
+        render:
+          p_curved_baseline: 0.30
+          baseline_arc_px: [4.0, 16.0]
+          baseline_wave_px: [2.0, 7.0]
+          p_wide_gaps: 0.25           # wide gaps between words, as in real essays
+          word_gap_scale: [1.5, 3.0]
+          p_bold_stroke: 0.15         # thicker pen than the font's own stroke
+        effects: {p_drop_shadow: 0.10, p_cast_shadow: 0.20, p_perspective: 0.25, p_elastic: 0.25, p_show_through: 0.20}
+        neighbors: {p_neighbor: 0.55, p_both_sides: 0.35, visible_frac: [0.08, 0.28], max_chars: 40}
+        output: {margin_frac: [0.06, 0.30], min_side: 96}
+
+    blank:                  # empty paper / show-through with an empty label
+      kind: blank
+      weight: 0.03
+      synth: synth
+
+    # weight 0 = not trained on, only evaluated: shows how pretraining transfers to real lines
+    cyrillic:
+      kind: tsv
+      lang: ru
+      weight: 0
+      root: ../recognition/data/cyrillic
+      train: "**/train.tsv"
+      test: "**/test.tsv"
+
+    iam:
+      kind: hf
+      lang: en
+      weight: 0
+      hf_id: Teklia/IAM-line
+      cache_dir: ../recognition/data/iam
+
+trainer:
+  max_steps: 300000
+  lr: 5.0e-4
+  weight_decay: 0.05
+  warmup_steps: 10000
+  min_lr_ratio: 0.02
+  grad_clip: 1.0
+  ema_decay: 0.9995
+  amp: true                 # bf16 autocast on cuda
+  log_every: 100
+  eval_every: 5000
+  eval_limit: 2000          # lines per held-out set during training (0 = all)
+  select_metric: nes_char   # best.pt = max harmonic mean of this metric over languages
+  select_head: decoder      # ctc | decoder

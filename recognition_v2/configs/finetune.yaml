@@ -1,0 +1,148 @@
+# Fine-tuning the pretrained recogniser on real lines. The model and image blocks come from
+# the `init` checkpoint.
+#   python scripts/train.py --config configs/finetune.yaml
+#   python scripts/train.py --config configs/finetune.yaml --resume
+
+run: outputs/finetune
+init: outputs/pretrain/best.pt
+seed: 42
+device: cuda
+
+loss:
+  ctc_weight: 0.5
+  label_smoothing: 0.1
+
+frame:                    # margins of a line crop around its box, in box heights
+  infer: [0.30, 0.25]     # [left/right, top/bottom] around a detector box at inference
+  detector: {x: [0.10, 0.60], y: [0.10, 0.40]}    # training range around detector boxes
+  labelled: {x: [0.00, 0.40], y: [-0.03, 0.15]}   # training range around hand-labelled polygons
+
+augment:
+  photometric: 0.6        # chance to apply shadow / colour / blur / low resolution / jpeg
+  context:                # put a pre-cropped line back into page-like surroundings
+    p: 0.7
+    x: [0.0, 0.5]         # paper added left and right, in line heights
+    y: [0.0, 0.3]         # paper added above and below
+    neighbour: 0.4        # chance that a sliver of another line shows in the added paper
+
+data:
+  batch_size: 128         # lines per batch at ref_width; wider lines -> fewer lines per batch
+  ref_width: 640
+  pool_batches: 6         # samples are sorted by width inside a pool of this many batches
+  workers: 8
+
+  # weight = share of training samples. `enabled: false` switches a source off,
+  # `context: false` keeps its crops as they are.
+  sources:
+    cyrillic:
+      kind: tsv
+      lang: ru
+      weight: 0.20
+      root: ../recognition/data/cyrillic
+      train: "**/train.tsv"
+      test: "**/test.tsv"
+
+    school_notebooks_ru:
+      kind: tsv
+      lang: ru
+      weight: 0.10
+      root: ../recognition/data/school_notebooks_ru
+      train: train.tsv
+      test: test.tsv
+
+    hwr200:
+      kind: pairs
+      lang: ru
+      weight: 0.24
+      images: /mnt/DATA2/varlamova/HTR/trocr/data/texts/hwr200/filtered_lines_v2/lines
+      texts: /mnt/DATA2/dorin/handwriting-recognition/recognition/data/lines_txt_clean
+      test_frac: 0.1
+      seed: 42
+
+    # Lines are cropped from the page. After scripts/detect_pages.py has written detections.json,
+    # the crops come from the detector's own boxes — the same crops the recogniser gets at inference.
+    essays:
+      kind: pages
+      lang: ru
+      weight: 0.08
+      root: /mnt/DATA2/dorin/handwriting-recognition/data/kaliningrad_essays
+      labels: labels.txt
+      detections: detections.json
+      test_frac: 0.3        # pages never trained on; contains the 10% test pages of finetune_essays
+      seed: 42
+
+    iam:
+      kind: hf
+      lang: en
+      weight: 0.08
+      hf_id: Teklia/IAM-line
+      cache_dir: ../recognition/data/iam
+
+    cvl:
+      kind: tsv
+      lang: en
+      weight: 0.04
+      root: ../recognition/data/cvl
+      train: "**/cvl_train.tsv"
+
+    school_notebooks_en:
+      kind: tsv
+      lang: en
+      weight: 0.03
+      root: ../recognition/data/school_notebooks_en
+      train: train.tsv
+      test: test.tsv
+
+    imgur5k:
+      kind: tsv
+      lang: en
+      weight: 0.03
+      root: ../recognition/data/imgur5k
+      train: train_good_v2.tsv
+      test: test_good_v2.tsv
+
+    synth:                  # keeps rare words, both alphabets and literal spelling in the mix
+      kind: synth
+      weight: 0.18
+      recognition_root: ../recognition
+      ru_text_dirs: ['/mnt/DATA2/varlamova/HTR/trocr/data/texts/school', '/mnt/DATA2/varlamova/HTR/trocr/data/texts/general']
+      en_text_dirs: ['/mnt/DATA2/varlamova/HTR/trocr/data/texts/english']
+      ru_text_weights: [0.6, 0.4]
+      ru_font_dirs: ['/mnt/DATA2/dorin/handwriting-recognition/recognition/assets/fonts_ru']
+      en_font_dirs: ['/mnt/DATA2/dorin/handwriting-recognition/recognition/assets/fonts_en']
+      p_ru: 0.6
+      len_chars: [4, 100]
+      p_hyphenate: 0.15
+      seed: 43
+      curriculum: false
+      overrides:
+        render:
+          p_curved_baseline: 0.30
+          baseline_arc_px: [4.0, 16.0]
+          baseline_wave_px: [2.0, 7.0]
+          p_wide_gaps: 0.25           # wide gaps between words, as in real essays
+          word_gap_scale: [1.5, 3.0]
+          p_bold_stroke: 0.15         # thicker pen than the font's own stroke
+        effects: {p_drop_shadow: 0.10, p_cast_shadow: 0.20, p_perspective: 0.25, p_elastic: 0.25, p_show_through: 0.20}
+        neighbors: {p_neighbor: 0.55, p_both_sides: 0.35, visible_frac: [0.08, 0.28], max_chars: 40}
+        output: {margin_frac: [0.06, 0.30], min_side: 96}
+
+    blank:
+      kind: blank
+      weight: 0.02
+      synth: synth
+
+trainer:
+  max_steps: 80000
+  lr: 1.5e-4
+  weight_decay: 0.05
+  warmup_steps: 2000
+  min_lr_ratio: 0.02
+  grad_clip: 1.0
+  ema_decay: 0.9995
+  amp: true
+  log_every: 100
+  eval_every: 2000
+  eval_limit: 0             # 0 = full held-out sets
+  select_metric: nes_char
+  select_head: decoder

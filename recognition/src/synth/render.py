@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 from .config import RenderConfig
 from .rng import chance, eased_centered, eased_uniform, lerp, scale_p, uniform
@@ -27,11 +27,14 @@ class LineRenderer:
         wob_max = cfg.baseline_wobble_px[1]
 
         space_min = cfg.space_min_frac * glyph_h
+        gap = 1.0
+        if cfg.p_wide_gaps > 0 and chance(rng, scale_p(cfg.p_wide_gaps, t)):
+            gap = uniform(rng, cfg.word_gap_scale)
         advances, jit = [], []
         for ch in text:
             a = float(font.getlength(ch))
             if ch == " ":
-                a = max(a, space_min)          # guarantee a word gap (fonts vary)
+                a = max(a, space_min) * gap    # guarantee a word gap (fonts vary)
             advances.append(a)
             jit.append(1.0 + eased_centered(rng, cfg.spacing_jitter, t))
         total_w = int(sum(a * j for a, j in zip(advances, jit))) + 2 * pad + glyph_h
@@ -74,6 +77,8 @@ class LineRenderer:
 
         canvas = self._shear(canvas, eased_centered(rng, cfg.slant_deg, t), baseline_y)
         canvas = self._rotate(canvas, eased_centered(rng, cfg.line_rotate_deg, t))
+        if cfg.p_bold_stroke > 0 and chance(rng, scale_p(cfg.p_bold_stroke, t)):
+            canvas = self._bold(canvas, ink)
         canvas = self._apply_alpha(canvas, base_alpha, grain_amt, rng)
 
         bbox = canvas.getbbox()
@@ -84,6 +89,13 @@ class LineRenderer:
         crop = canvas.crop((max(0, x0 - p), max(0, y0 - p),
                             min(canvas.width, x1 + p), min(canvas.height, y1 + p)))
         return crop, {"ink": ink, "pencil": pencil, "empty": False}
+
+    @staticmethod
+    def _bold(canvas, ink):
+        """Thicker pen: widen the ink mask by a pixel on every side and repaint it in the ink colour."""
+        layer = Image.new("RGBA", canvas.size, (*ink, 0))
+        layer.putalpha(canvas.getchannel("A").filter(ImageFilter.MaxFilter(3)))
+        return layer
 
     @staticmethod
     def _glyph_tile(ch, font, ink, ascent, descent):

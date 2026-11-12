@@ -1,0 +1,12 @@
+torch>=2.1
+pillow>=10.1
+numpy
+omegaconf
+jiwer
+rapidfuzz
+tqdm
+datasets                 # IAM lines
+
+# the synthetic generator lives in ../recognition/src/synth
+fonttools
+albumentations>=1.4

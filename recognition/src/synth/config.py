@@ -69,6 +69,10 @@ class RenderConfig:
     baseline_arc_px: tuple[float, float] = (4.0, 14.0)     # parabolic sag/bulge amplitude
     baseline_wave_px: tuple[float, float] = (2.0, 6.0)     # sine waviness amplitude
     baseline_wave_harmonics: int = 2
+    # wide word gaps and a thicker pen. 0 -> off (earlier runs untouched, draw no RNG).
+    p_wide_gaps: float = 0.0                 # chance a line is written with wide gaps between words
+    word_gap_scale: tuple[float, float] = (1.5, 3.5)       # how much wider the gaps of such a line are
+    p_bold_stroke: float = 0.0               # chance the stroke is a pixel thicker than the font draws it
 
 
 @dataclass
