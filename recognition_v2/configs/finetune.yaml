@@ -59,9 +59,12 @@ data:
       test_frac: 0.1
       seed: 42
 
-    # Lines are cropped from the page. After scripts/detect_pages.py has written detections.json,
-    # the crops come from the detector's own boxes — the same crops the recogniser gets at inference.
+    # Off: the essays stay a pure test set, comparable with the other systems on all pages.
+    # When switched on, 70% of the pages are trained on. Lines are cropped from the page; after
+    # scripts/detect_pages.py has written detections.json the crops come from the detector's own
+    # boxes — the same crops the recogniser gets at inference.
     essays:
+      enabled: false
       kind: pages
       lang: ru
       weight: 0.08
@@ -143,6 +146,6 @@ trainer:
   amp: true
   log_every: 100
   eval_every: 2000
-  eval_limit: 0             # 0 = full held-out sets
+  eval_limit: 300           # lines per held-out set during training, a fixed random sample (0 = all)
   select_metric: nes_char
   select_head: decoder

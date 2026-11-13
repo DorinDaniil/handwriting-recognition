@@ -6,6 +6,8 @@ budget: wide lines make smaller batches, narrow ones larger, and little is spent
 """
 from __future__ import annotations
 
+import random
+
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, IterableDataset, get_worker_info
@@ -123,11 +125,12 @@ def _by_width(items):
 
 
 def test_batches(items, cfg, limit: int = 0):
-    """Yield (images, widths, texts) over a test list, lines of similar width together."""
+    """Yield (images, widths, texts) over a test list, lines of similar width together.
+    With a limit, a random sample of the list is read — the same lines at every evaluation."""
     size = cfg.data.get("eval_batch_size", cfg.data.batch_size)
     data = TestLines(items, cfg)
     if limit and limit < len(data):
-        data = torch.utils.data.Subset(data, range(limit))
+        data = torch.utils.data.Subset(data, sorted(random.Random(0).sample(range(len(data)), limit)))
     loader = DataLoader(data, batch_size=8 * size, num_workers=min(4, cfg.data.workers), collate_fn=_by_width)
     for chunk in loader:
         for i in range(0, len(chunk), size):

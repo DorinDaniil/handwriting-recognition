@@ -39,9 +39,12 @@ def build_model(cfg):
     return model, Alphabet(saved["alphabet"])
 
 
-def main(config, resume):
+def main(config, resume, fresh):
     cfg = OmegaConf.load(config)
     cfg.run = str(ROOT / cfg.run)
+    if (Path(cfg.run) / "last.pt").exists() and not (resume or fresh):
+        raise SystemExit(f"{cfg.run} already holds a run: pass --resume to continue it "
+                         f"or --fresh to start over and overwrite its checkpoints")
     torch.manual_seed(cfg.get("seed", 42))
 
     model, alphabet = build_model(cfg)
@@ -60,6 +63,7 @@ def main(config, resume):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="configs/pretrain.yaml")
-    ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--resume", action="store_true", help="continue from last.pt of the run")
+    ap.add_argument("--fresh", action="store_true", help="start over even if the run already has checkpoints")
     args = ap.parse_args()
-    main(args.config, args.resume)
+    main(args.config, args.resume, args.fresh)
