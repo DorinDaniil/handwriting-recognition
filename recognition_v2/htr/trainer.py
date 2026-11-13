@@ -8,6 +8,8 @@ from __future__ import annotations
 import copy
 import json
 import math
+import os
+import signal
 import time
 from collections import defaultdict
 from dataclasses import asdict
@@ -133,10 +135,26 @@ def train(model, alphabet, loader, sources, cfg, device, counter, resume: bool =
 
     print(f"steps {step} -> {t.max_steps} | eval every {t.eval_every} | "
           f"best by harmonic {metric} of the {head} head over languages")
+    def save_state():
+        torch.save({"model": model.state_dict(), "ema": ema.state, "optimizer": optimizer.state_dict(),
+                    "scheduler": scheduler.state_dict(), "step": step, "best": best}, out / "last.pt")
+
+    trainer, stop = os.getpid(), []
+
+    def on_interrupt(*_):
+        """Ctrl+C: finish the current step, save and leave; a second Ctrl+C quits at once."""
+        if os.getpid() != trainer:
+            return
+        if stop:
+            raise KeyboardInterrupt
+        stop.append(True)
+        print("\nstopping after this step, the state will be saved (Ctrl+C again to quit at once)", flush=True)
+
+    signal.signal(signal.SIGINT, on_interrupt)
     model.train()
     seen, lines, started = defaultdict(float), 0, time.time()
     for batch in loader:
-        if step >= t.max_steps:
+        if step >= t.max_steps or stop:
             break
         texts = batch.pop("texts")
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
@@ -177,8 +195,11 @@ def train(model, alphabet, loader, sources, cfg, device, counter, resume: bool =
                 print(f"  [step {step}] saved best.pt" + ("" if value is None else f", harmonic {metric} {value:.4f}"))
             else:
                 print(f"  [step {step}] harmonic {metric} {value:.4f} (best {best:.4f})")
-            torch.save({"model": model.state_dict(), "ema": ema.state, "optimizer": optimizer.state_dict(),
-                        "scheduler": scheduler.state_dict(), "step": step, "best": best}, out / "last.pt")
+            save_state()
             model.train()
             started, lines = time.time(), 0
-    print("done.")
+    if stop:
+        save_state()
+        print(f"stopped at step {step}: state saved to last.pt, continue with --resume")
+    else:
+        print("done.")

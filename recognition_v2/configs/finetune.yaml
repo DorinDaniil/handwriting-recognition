@@ -59,12 +59,11 @@ data:
       test_frac: 0.1
       seed: 42
 
-    # Off: the essays stay a pure test set, comparable with the other systems on all pages.
-    # When switched on, 70% of the pages are trained on. Lines are cropped from the page; after
-    # scripts/detect_pages.py has written detections.json the crops come from the detector's own
-    # boxes — the same crops the recogniser gets at inference.
+    # 70% of the pages are trained on, 30% are held out (`enabled: false` keeps the essays a pure
+    # test set). Lines are cropped from the page; after scripts/detect_pages.py has written
+    # detections.json the crops come from the detector's own boxes — the same crops the
+    # recogniser gets at inference.
     essays:
-      enabled: false
       kind: pages
       lang: ru
       weight: 0.08
